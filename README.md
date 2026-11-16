@@ -40,6 +40,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-installer.ps1
 
 推一个 `v0.1.0` 的 tag，GitHub Actions 会出三平台安装包并挂到草稿 Release。步骤见 [docs/RELEASE.md](docs/RELEASE.md)。
 
+## 状态
+
+G0 骨架完成。内核单测与 CLI 端到端已在 Linux 通过（Python 3.10 / SQLite 3.37）；Tauri 外壳与安装器待 Windows 真机编译验证。路线与验收标准见 [docs/G0-CHECKLIST.md](docs/G0-CHECKLIST.md)。
+
 只想先看界面：直接用浏览器打开 `ui/preview.html`，三窗并排预览，无需 Tauri。
 
 ## 右键与快捷键

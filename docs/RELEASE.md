@@ -1,13 +1,23 @@
 # 发布到 GitHub
 
-## 第一次上传
+## 一条命令
 
 ```powershell
 cd H:\CC小姐\tack
-git init
+powershell -ExecutionPolicy Bypass -File .\scripts\publish.ps1 -Repo tack
+```
+
+它会依次做：初始化仓库（已有则跳过）→ 设作者 → 首次提交 → 配 remote → 推送。中途只需你做两件事：输入 GitHub 用户名，以及在提示时去 `https://github.com/new` 建一个空仓库（**不要**勾选 README / .gitignore / LICENSE）。
+
+密码框里要的是 Personal Access Token，不是账号密码：Settings → Developer settings → Personal access tokens → Generate new token，勾 `repo` 即可。
+
+## 手动方式（等价）
+
+```powershell
+cd H:\CC小姐\tack
+git init -b main
 git add .
 git commit -m "G0 skeleton"
-git branch -M main
 git remote add origin https://github.com/<你的用户名>/tack.git
 git push -u origin main
 ```
