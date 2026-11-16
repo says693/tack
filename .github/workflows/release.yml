@@ -1,0 +1,70 @@
+name: release
+
+# Push a tag like v0.1.0 and three installers attach themselves to the Release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ""
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
+          - platform: ubuntu-22.04
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Generate icons
+        shell: bash
+        run: |
+          if [ ! -f src-tauri/icons/icon.ico ]; then
+            if [ "$RUNNER_OS" = "Windows" ]; then
+              powershell -ExecutionPolicy Bypass -File scripts/make-icons.ps1
+            else
+              python3 scripts/make-icons.py
+            fi
+          fi
+
+      - name: Install dependencies
+        run: npm install --no-fund --no-audit
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "tack ${{ github.ref_name }}"
+          releaseBody: "纸与墨的知识钉板。Windows 下载 -setup.exe，macOS 下载 .dmg，Linux 下载 .AppImage。"
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}

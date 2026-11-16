@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>tack · 今日</title>
+  <link rel="stylesheet" href="styles/tack.css" />
+  <link rel="stylesheet" href="styles/windows.css" />
+  <link rel="stylesheet" href="styles/menus.css" />
+</head>
+<body class="main">
+  <div class="main-shell" id="shell">
+    <header class="main-top drag">
+      <span class="wordmark no-drag">tack</span>
+      <button class="subject-chip no-drag" id="subject" title="Ctrl+Tab 切换科目">
+        <span>生物 · 细胞与能量</span>
+      </button>
+      <div class="main-top-right no-drag">
+        <span class="stepper" id="stepper">1 / 6</span>
+        <button class="icon-btn" id="btn-help" title="键位表（?）">
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7" cy="7" r="5.2"/><path d="M5.5 5.6a1.6 1.6 0 1 1 2.3 1.5c-.5.3-.8.6-.8 1.1"/><circle cx="7" cy="10.1" r=".55" fill="currentColor" stroke="none"/></svg>
+        </button>
+        <button class="icon-btn" id="btn-down" title="最小化">
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 9.5L7 5l4 4.5"/></svg>
+        </button>
+        <button class="icon-btn" id="btn-close" title="隐藏窗口">
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="progress"><i id="progress" style="width:18%"></i></div>
+
+    <div class="day-line">
+      <span class="day-date" id="day-date"></span>
+      <span class="tag tag-flow" id="day-tag"></span>
+    </div>
+
+    <main class="stream" id="stream" aria-label="今日复习卡"></main>
+
+    <footer class="main-foot">
+      <span class="foot-hint" id="foot-hint">按住 450ms 选中文字 · 右键有菜单 · ? 看键位</span>
+      <div class="foot-actions">
+        <button class="btn" id="btn-later">跳过</button>
+        <button class="btn btn-pin" id="btn-solid">记住了</button>
+      </div>
+    </footer>
+
+    <div class="drop-veil" id="veil"><p>松手导入教材</p></div>
+    <div class="longpress-hint" id="press-hint">[s] 长按中 · 松开即开锚点窗</div>
+  </div>
+  <script src="js/bridge.js"></script>
+  <script src="js/longpress.js"></script>
+  <script src="js/notify.js"></script>
+  <script src="js/contextmenu.js"></script>
+  <script src="js/keys.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

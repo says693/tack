@@ -1,0 +1,15 @@
+{
+  "name": "tack",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A knowledge pinboard that lives at the edge of your screen.",
+  "license": "MIT",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}

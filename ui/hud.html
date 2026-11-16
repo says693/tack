@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>tack</title>
+  <link rel="stylesheet" href="styles/tack.css" />
+  <link rel="stylesheet" href="styles/windows.css" />
+  <link rel="stylesheet" href="styles/menus.css" />
+</head>
+<body class="hud">
+  <div class="capsule" id="capsule" title="单击打开 / 收起主窗，拖动移动位置，右键更多">
+    <span class="pinhead" aria-hidden="true"></span>
+    <span class="capsule-due" id="due"><b>0</b> 待复习</span>
+    <span class="capsule-mode" id="mode" data-mode="ready">READY</span>
+  </div>
+  <script src="js/bridge.js"></script>
+  <script src="js/notify.js"></script>
+  <script src="js/contextmenu.js"></script>
+  <script>
+    (async function () {
+      const b = window.tackBridge;
+      const capsule = document.getElementById("capsule");
+
+      // Tauri 里拖动整个无边框窗口会吞掉 click，所以不用 drag 区：
+      // 指针按下后交给系统拖动，松手时读位移判断是"点"还是"拖"。
+      let downAt = null;
+      capsule.addEventListener("pointerdown", async (e) => {
+        if (e.button !== 0) return;
+        downAt = { x: e.clientX, y: e.clientY };
+        if (b.hasTauri) {
+          try {
+            await window.__TAURI__.window.getCurrentWindow().startDragging();
+          } catch (err) {
+            /* 拖动期间松手可能抛，忽略 */
+          }
+        }
+      });
+
+      capsule.addEventListener("pointerup", async (e) => {
+        if (!downAt) return;
+        const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
+        downAt = null;
+        if (moved > 4) return; // 是拖动，不是点击
+        try {
+          await b.invoke("toggle_main");
+        } catch (err) {
+          console.warn(err);
+        }
+      });
+
+      // 右键：HUD 自己的菜单
+      let pinned = true;
+      document.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        window.openMenu(e.clientX, e.clientY, [
+          {
+            label: "打开今日",
+            hint: "Ctrl+Shift+T",
+            run: () => b.invoke("toggle_main"),
+          },
+          {
+            label: "回到右下角",
+            run: () => b.invoke("reset_hud"),
+          },
+          { sep: true },
+          {
+            label: "钉在屏幕最上层",
+            checked: pinned,
+            run: async () => {
+              pinned = !pinned;
+              await b.invoke("set_hud_always_on_top", { onTop: pinned }).catch(() => {});
+              window.notify(pinned ? "已钉在最上层" : "已取消置顶");
+            },
+          },
+          { sep: true },
+          {
+            label: "退出 tack",
+            danger: true,
+            run: () => b.invoke("quit_app"),
+          },
+        ]);
+      });
+
+      // 今日待复习数：由主窗广播过来，HUD 只读。
+      b.on("hud:due", (n) => {
+        document.querySelector("#due b").textContent = String(n ?? 0);
+      });
+
+      b.on("hud:mode", (m) => {
+        const el = document.getElementById("mode");
+        el.dataset.mode = m;
+        el.textContent = String(m || "ready").toUpperCase();
+      });
+
+      // 没有主窗数据时也先给一个真诚的初始态。
+      document.querySelector("#due b").textContent = "0";
+    })();
+  </script>
+</body>
+</html>

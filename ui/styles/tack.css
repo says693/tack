@@ -1,0 +1,185 @@
+/* ============================================================
+   tack · 设计令牌
+   纸与墨：温白纸面、深墨文字，唯一重色是朱红"钉头"。
+   钉头只出现在一个地方——当前那张卡。
+   ============================================================ */
+
+:root {
+  color-scheme: light;
+
+  /* 纸 */
+  --paper: #f3f0e8;
+  --paper-raised: #faf8f3;
+  --paper-sunk: #ece8dd;
+
+  /* 墨 */
+  --ink: #1e1c19;
+  --ink-soft: #45423b;
+  --ink-quiet: #6b665b;
+  --ink-faint: #9a9486;
+
+  /* 钉头 */
+  --pin: #b5432a;
+  --pin-deep: #8c3320;
+  --pin-wash: rgba(181, 67, 42, 0.09);
+
+  /* 层 */
+  --tier-1: #1e1c19;
+  --tier-2: #6b665b;
+  --tier-3: #6a7156;
+
+  /* 线 */
+  --hair: #d9d4c7;
+  --hair-strong: #c4bead;
+
+  /* 字 */
+  --font-display: "Iowan Old Style", "Palatino Linotype", "Songti SC",
+    "Noto Serif SC", "Source Han Serif SC", "SimSun", serif;
+  --font-reading: "Optima", "Seravek", "PingFang SC", "Microsoft YaHei",
+    "Noto Sans SC", sans-serif;
+  --font-data: "Cascadia Code", "Consolas", "SF Mono", ui-monospace, monospace;
+
+  /* 尺 */
+  --gap: 24px;
+  --gap-s: 12px;
+  --radius-window: 14px;
+  --radius-card: 4px;
+
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-reading);
+  color: var(--ink);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+  user-select: none;
+}
+
+::selection {
+  background: var(--pin-wash);
+  color: var(--pin-deep);
+}
+
+/* 几何标签：全界面唯一允许的"装饰"，且只用于状态 */
+.tag {
+  font-family: var(--font-data);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--ink-quiet);
+  white-space: nowrap;
+}
+
+.tag-pin {
+  color: var(--pin);
+}
+
+.tag-ready::before {
+  content: "[READY]";
+}
+
+.tag-flow::before {
+  content: "[FLOW]";
+}
+
+.tag-deep::before {
+  content: "[DEEP]";
+}
+
+.tag-fork::before {
+  content: "[FORK]";
+}
+
+.tag-pin-label::before {
+  content: "[PIN]";
+}
+
+/* 细线 */
+.hair {
+  height: 1px;
+  background: var(--hair);
+  border: 0;
+}
+
+/* 所有窗口共用的无边框拖拽区 */
+.drag {
+  -webkit-app-region: drag;
+}
+
+.no-drag,
+button,
+input {
+  -webkit-app-region: no-drag;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 1px solid var(--pin);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------- 共享组件 ---------- */
+
+.btn {
+  font-family: var(--font-data);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 7px 10px;
+  border: 1px solid var(--hair-strong);
+  border-radius: 3px;
+  color: var(--ink-soft);
+  transition: border-color 0.15s var(--ease), color 0.15s var(--ease),
+    background 0.15s var(--ease);
+}
+
+.btn:hover {
+  border-color: var(--ink-faint);
+  color: var(--ink);
+}
+
+.btn-pin {
+  border-color: var(--pin);
+  color: var(--pin);
+}
+
+.btn-pin:hover {
+  background: var(--pin);
+  color: var(--paper-raised);
+  border-color: var(--pin);
+}
+
+.kicker {
+  font-family: var(--font-data);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+}

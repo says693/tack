@@ -1,0 +1,12 @@
+*.pyc
+__pycache__/
+core/.venv/
+node_modules/
+target/
+data/
+core/tack.local.json
+*.local.json
+.env
+.env.*
+.DS_Store
+Thumbs.db

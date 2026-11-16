@@ -1,0 +1,5 @@
+# tack 内核依赖：保持极小
+pypdf>=4.0            # PDF 文本提取（BSD-3，非 AGPL）
+openai>=1.30          # 任何 OpenAI 兼容端点（含 tianxuncloud /v1）
+instructor>=1.2       # 结构化输出（可选路径，G2 起使用）
+keyring>=24.0         # API Key 进 Windows 凭据管理器
