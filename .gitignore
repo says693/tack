@@ -6,7 +6,6 @@ desktop.ini
 # --- Node ---
 node_modules/
 npm-debug.log*
-package-lock.json
 
 # --- Rust / Tauri ---
 target/
@@ -14,9 +13,13 @@ src-tauri/gen/
 
 # --- Python ---
 core/.venv/
+core/build/
+core/dist/
+src-tauri/binaries/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+test-results/
 
 # --- tack data: 一科一库，零密钥 ---
 data/

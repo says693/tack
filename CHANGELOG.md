@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.1 — 2026-11-16
+
+- Replaced demo business state with a bundled transactional Python sidecar.
+- Separated answer keys and review history; normalized due timestamps and interval caps.
+- Explicit online/offline modes; strict model results; no silent error fallback.
+- Versioned document chunks and idempotent mutations preserve data and sources.
+- Fixed draft loss, save retry, final-card completion, modal shortcuts and HUD menus.
+- Added dependency locks, regression tests, frozen-executable tests and CI gates.
+
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与语义化版本。
 
 ## [Unreleased]

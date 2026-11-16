@@ -131,7 +131,7 @@ def cmd_quiz(subject: str) -> None:
     print(f"\n评分 {result['score']}/3")
     for n in result["notes"]:
         print("  ·", n)
-    nxt = schedule.apply_review(conn, card.id, result["score"], answer=answer)
+    nxt = schedule.apply_review(conn, card.id, result["score"], answer=answer, method=result["method"])
     print(f"\n下次出现：{nxt['due']}（间隔 {nxt['interval_d']} 天，状态 {nxt['state']}）")
 
 

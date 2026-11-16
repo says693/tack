@@ -8,10 +8,9 @@ from __future__ import annotations
 import re
 import sqlite3
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from . import config
+from . import clock, config
 
 SCHEMA = """
 PRAGMA journal_mode = WAL;
@@ -84,7 +83,7 @@ CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
 END;
 """
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 
 @dataclass
@@ -98,6 +97,9 @@ class Card:
     tier: int
     state: str
     due: str
+    due_at: int
+    parent: str
+    chunk_id: int | None
 
 
 def slugify(name: str) -> str:
@@ -110,18 +112,55 @@ def db_path(slug: str) -> Path:
 
 
 def connect(slug_or_path: str | Path) -> sqlite3.Connection:
-    path = Path(slug_or_path)
-    if not path.suffix:
-        path = db_path(str(slug_or_path))
+    path = slug_or_path if isinstance(slug_or_path, Path) else db_path(slug_or_path)
     config.ensure_dirs()
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=20)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
-    conn.execute(
-        "INSERT INTO meta (key, value) VALUES ('schema', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        (SCHEMA_VERSION,),
-    )
+    try:
+        _migrate(conn)
+    except Exception:
+        conn.close()
+        raise
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    version = conn.execute("SELECT value FROM meta WHERE key='schema'").fetchone()
+    if version and version[0] not in ("1", SCHEMA_VERSION):
+        raise RuntimeError("数据库版本不受支持，拒绝降级写入")
+    columns = {r["name"] for r in conn.execute("PRAGMA table_info(cards)")}
+    with conn:
+        # Python's sqlite3 does not implicitly BEGIN for ALTER TABLE.
+        # Include DDL in the same transaction so failed conversions cannot leave
+        # half-migrated columns that appear to be a completed migration.
+        conn.execute("BEGIN IMMEDIATE")
+        if "due_at" not in columns:
+            conn.execute("ALTER TABLE cards ADD COLUMN due_at INTEGER NOT NULL DEFAULT 0")
+            conn.execute("ALTER TABLE cards ADD COLUMN source_text TEXT NOT NULL DEFAULT ''")
+            conn.execute("ALTER TABLE cards ADD COLUMN dedupe_key TEXT")
+            for row in conn.execute("SELECT id,due,reviewed_at FROM cards").fetchall():
+                stamp = clock.legacy_timestamp(row["due"])
+                conn.execute("UPDATE cards SET due_at=?,due=? WHERE id=?",
+                             (stamp, clock.iso(stamp), row["id"]))
+            # v1 overwrote answer keys during review. Never silently trust them.
+            conn.execute("UPDATE cards SET state='needs_verification' WHERE reviewed_at IS NOT NULL")
+        doc_columns = {r["name"] for r in conn.execute("PRAGMA table_info(documents)")}
+        if "current_version" not in doc_columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN current_version INTEGER NOT NULL DEFAULT 1")
+            conn.execute("ALTER TABLE documents ADD COLUMN digest TEXT NOT NULL DEFAULT ''")
+            conn.execute("ALTER TABLE chunks ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_card_dedupe ON cards(dedupe_key)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_due_at ON cards(subject,due_at,state)")
+        conn.execute("""CREATE TABLE IF NOT EXISTS reviews (
+          id INTEGER PRIMARY KEY, card_id INTEGER NOT NULL REFERENCES cards(id),
+          answer TEXT, score INTEGER NOT NULL CHECK(score BETWEEN 0 AND 3),
+          method TEXT NOT NULL, reviewed_at INTEGER NOT NULL, due_at INTEGER NOT NULL)""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS operations (
+          request_id TEXT PRIMARY KEY, digest TEXT NOT NULL, result TEXT NOT NULL)""")
+        conn.execute(
+            "INSERT INTO meta(key,value) VALUES('schema',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (SCHEMA_VERSION,))
 
 
 def ensure_subject(conn: sqlite3.Connection, slug: str, name: str | None = None) -> str:
@@ -138,33 +177,31 @@ def search(conn: sqlite3.Connection, query: str, limit: int = 10) -> list[dict]:
     q = query.strip()
     if not q:
         return []
-    rows: list[sqlite3.Row] = []
     if len(q) >= 3:
-        try:
-            rows = conn.execute(
+        rows = conn.execute(
                 """
                 SELECT c.id, c.heading, c.body, d.title AS doc
                 FROM chunks_fts f
                 JOIN chunks c ON c.id = f.rowid
                 JOIN documents d ON d.id = c.doc_id
-                WHERE chunks_fts MATCH ?
+                WHERE chunks_fts MATCH ? AND c.version=d.current_version
                 ORDER BY bm25(chunks_fts)
                 LIMIT ?
                 """,
                 ('"' + q.replace('"', '""') + '"', limit),
-            ).fetchall()
-        except sqlite3.OperationalError:
-            rows = []
-    if not rows:
+        ).fetchall()
+    else:
+        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         rows = conn.execute(
             """
             SELECT c.id, c.heading, c.body, d.title AS doc
             FROM chunks c
             JOIN documents d ON d.id = c.doc_id
-            WHERE c.body LIKE ? OR c.heading LIKE ?
+            WHERE c.version=d.current_version AND
+              (c.body LIKE ? ESCAPE '\\' OR c.heading LIKE ? ESCAPE '\\')
             LIMIT ?
             """,
-            (f"%{q}%", f"%{q}%", limit),
+            (f"%{escaped}%", f"%{escaped}%", limit),
         ).fetchall()
     out = []
     for r in rows:
@@ -177,6 +214,7 @@ def search(conn: sqlite3.Connection, query: str, limit: int = 10) -> list[dict]:
                 "doc": r["doc"],
                 "heading": r["heading"],
                 "snippet": ("…" if start else "") + body[start : start + 140] + "…",
+                "body": body,
             }
         )
     return out
@@ -193,27 +231,35 @@ def add_card(
     source: str = "",
     tier: int = 3,
     chunk_id: int | None = None,
+    source_text: str = "",
+    dedupe_key: str | None = None,
+    commit: bool = True,
 ) -> int:
+    stamp = clock.now()
     cur = conn.execute(
         """
-        INSERT INTO cards (subject, chunk_id, title, line, prompt, answer, source, tier)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO cards (subject, chunk_id, title, line, prompt, answer, source, tier,
+                           due_at,due,source_text,dedupe_key)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (subject, chunk_id, title, line, prompt, answer, source, tier),
+        (subject, chunk_id, title, line, prompt, answer, source, tier,
+         stamp, clock.iso(stamp), source_text, dedupe_key),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
     return int(cur.lastrowid)
 
 
-def due_cards(conn: sqlite3.Connection, subject: str, limit: int = 30) -> list[Card]:
+def due_cards(conn: sqlite3.Connection, subject: str, limit: int = 30, *, now: int | None = None) -> list[Card]:
     rows = conn.execute(
         """
-        SELECT * FROM cards
-        WHERE subject = ? AND due <= date('now')
-        ORDER BY due, id
+        SELECT cards.*,COALESCE(chunks.body,cards.source_text) AS parent
+        FROM cards LEFT JOIN chunks ON chunks.id=cards.chunk_id
+        WHERE subject = ? AND due_at <= ? AND state IN ('new','learning','review')
+        ORDER BY due_at, cards.id
         LIMIT ?
         """,
-        (subject, limit),
+        (subject, clock.now() if now is None else now, limit),
     ).fetchall()
     return [
         Card(
@@ -226,14 +272,18 @@ def due_cards(conn: sqlite3.Connection, subject: str, limit: int = 30) -> list[C
             tier=r["tier"],
             state=r["state"],
             due=r["due"],
+            due_at=r["due_at"],
+            parent=r["parent"],
+            chunk_id=r["chunk_id"],
         )
         for r in rows
     ]
 
 
-def count_due(conn: sqlite3.Connection, subject: str) -> int:
+def count_due(conn: sqlite3.Connection, subject: str, *, now: int | None = None) -> int:
     row = conn.execute(
-        "SELECT COUNT(*) AS n FROM cards WHERE subject = ? AND due <= date('now')",
-        (subject,),
+        """SELECT COUNT(*) AS n FROM cards WHERE subject = ? AND due_at <= ?
+           AND state IN ('new','learning','review')""",
+        (subject, clock.now() if now is None else now),
     ).fetchone()
     return int(row["n"])

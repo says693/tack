@@ -1,90 +1,100 @@
 # tack
 
-常驻桌面的知识钉板。随手选中一段文字 → 钉成一张卡 → 每天被温和地提醒复习 → 答错时被告知错在哪。
+常驻桌面的知识钉板。导入资料、生成卡片、作答、记录复习时间。Tauri 2 外壳 + Python 内核 + SQLite，一科一库。
 
-> 工作名。中文名候选：图钉 / 钉板 / 知钉。
+## v0.1.1：真实学习闭环
 
-## 形态
+- 导入 UTF-8 TXT / Markdown / 文本型 PDF，可搜索、生成学习卡。
+- 科目独立；钉卡、评分、暂停、恢复、今晚/明天复习均写入数据库，重启后保留。
+- 标准答案与用户作答分开保存；按 UTC 秒判断到期，按本地日历安排明天。
+- 导入相同内容不会重复生成卡；文档更新后旧卡仍能追溯其原文版本。
+- 明确离线模式使用关键词近似评分；明确在线模式调用 OpenAI 兼容 HTTPS 端点。
+- 在线调用失败或响应不合法会报错并回滚，不转为离线“成功”。
+- Windows 安装包携带 Python 内核，不要求最终用户安装 Python、Node 或 Rust。
+- HUD 使用原生弹出菜单；主窗/锚点支持显式拖动区域。
 
-- **HUD 胶囊**（180×40）常驻屏幕边缘，不抢焦点。
-- **主窗**（440×712）每日下行流：今天要复习的卡，一张一张过。
-- **锚点窗**（272×440，440÷1.618 黄金比例）长按选中文字后弹出，只读钉子：一句话提炼 + 原文对照，`[X 丢弃]` / `[PIN 钉住]`。
+## 开发（Windows）
 
-## 目录
-
-```
-tack/
-  src-tauri/        Tauri 2 外壳（Rust，多窗、置顶、托盘、HUD 定位）
-  ui/               三窗前端（原生 HTML/CSS/JS，无构建步骤）
-  core/             Python 内核（SQLite FTS5、切分、出题、批改、调度）
-  data/             一科一库（git 忽略，零密钥）
-  docs/             决策记录、信源清单、安全披露
-  scripts/          Windows 一键脚本
-```
-
-## 快速开始（Windows）
+构建环境：Node 24、Rust 1.98 / MSVC、uv 0.12.17、WebView2。Python 3.12 由 uv 管理。
 
 ```powershell
-# 1. 环境体检（缺什么它会告诉你）
-powershell -ExecutionPolicy Bypass -File .\check-env.ps1
-
-# 2. 一键安装（npm 依赖、Cargo 依赖、Python 虚拟环境）
-powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1
-
-# 3. 开发运行
-powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1
-
-# 4. 出安装包（当前用户安装，免管理员）
-powershell -ExecutionPolicy Bypass -File .\scripts\build-installer.ps1
+.\scripts\setup.ps1
+npm run dev
 ```
 
-推一个 `v0.1.0` 的 tag，GitHub Actions 会出三平台安装包并挂到草稿 Release。步骤见 [docs/RELEASE.md](docs/RELEASE.md)。
-
-## 状态
-
-G0 骨架完成。内核单测与 CLI 端到端已在 Linux 通过（Python 3.10 / SQLite 3.37）；Tauri 外壳与安装器待 Windows 真机编译验证。路线与验收标准见 [docs/G0-CHECKLIST.md](docs/G0-CHECKLIST.md)。
-
-只想先看界面：直接用浏览器打开 `ui/preview.html`，三窗并排预览，无需 Tauri。
-
-## 右键与快捷键
-
-三窗都有自己的右键菜单：卡片（钉住 / 今晚再看 / 跳过 / 放下）、科目标签（带勾选态）、HUD（置顶 / 回右下角 / 退出）、锚点（复制 / 改名 / 钉住 / 丢弃）。菜单每行标着键位。
-
-主窗过卡不碰鼠标：`Space` 提示、`Enter` 交卷、`N` 下一张、`S` 跳过、`P` 钉住、`L` 排今晚、`C` 复制、`Ctrl+Tab` 切科目、`?` 键位表。全局 `Ctrl+Shift+T` 任何程序前都能唤出主窗。完整说明见 [docs/MENUS-KEYS.md](docs/MENUS-KEYS.md)。
-
-## 内核（可单独使用）
+安装包：
 
 ```powershell
-cd core
-python -m tack_core.cli init demo          # 建 demo 库
-python -m tack_core.cli ingest demo .\某本书.pdf
-python -m tack_core.cli search demo "光合作用"
-python -m tack_core.cli quiz demo           # 出题并作答（无 API Key 时走启发式，也能跑通）
-python -m tack_core.cli due demo            # 今天该复习的卡
+.\scripts\build-installer.ps1
 ```
 
-## 模型接入
+或者 `npm run build -- --bundles nsis -- --locked`。准备内核会使用 PyInstaller 打包并按本机 Rust target 命名 sidecar。**不能将本机 Python 二进制直接交叉编译为其他平台。**
 
-任何 OpenAI 兼容端点都可以：在 `core/tack.local.json` 里写 `base_url` 和 `model`，Key 只进系统钥匙串或环境变量：
+## 界面
+
+1. 点击左上角科目名可创建/切换科目、恢复暂停卡。
+2. 点击“导入材料”或拖入文件；只有事务提交后才显示成功。
+3. 作答后“交卷”显示评分与下次复习时间；点击“下一张”继续。
+4. “记住了”是明确的自评，会记录 3 分；“明天再看”只延期，不伪造答题记录。
+5. 原文区长按或按 P 开锚点，确认名字后保存。
+6. 关闭主窗只是隐藏；HUD 或托盘菜单可退出。
+
+独立浏览器页面是**静态预览**，会明确提示不能执行学习操作，不提供模拟成功结果。
+
+## 数据与配置
+
+默认目录：
+
+- Windows：`%APPDATA%\app.tack.desktop`
+- macOS：`~/Library/Application Support/app.tack.desktop`
+- Linux：`~/.local/share/app.tack.desktop`
+
+桌面内核由外壳指定同一目录；CLI 使用相同默认约定。`TACK_DATA_DIR` 可显式指定隔离的验收目录。科目库位于 `subjects/`；配置为 `config.json`。界面科目管理中会显示实际完整路径。
+
+默认没有配置文件时是明确的 `offline` 模式，不联网。在线模式配置示例：
 
 ```json
 {
   "llm": {
-    "base_url": "https://api.tianxuncloud.xyz/v1",
-    "model": "deepseek-chat"
+    "mode": "online",
+    "base_url": "https://YOUR-ENDPOINT/v1",
+    "model": "YOUR-MODEL",
+    "fast_model": "YOUR-MODEL",
+    "timeout_s": 60
   }
 }
 ```
 
-Key 的获取顺序：环境变量 `TACK_API_KEY`（或 `DEEPSEEK_API_KEY`）→ Windows 凭据管理器 `tack/llm`。**Key 永远不会写进 `data/`，也不会进 git。**
+Key 只读取项目专用 `TACK_API_KEY`，或系统钥匙串中的 service=`tack` / username=`llm`。不会借用 `OPENAI_API_KEY` 或 `DEEPSEEK_API_KEY`。环境变量 `TACK_MODE`、`TACK_BASE_URL`、`TACK_MODEL` 可显式覆盖配置。配置损坏直接报错。
 
-## 安全
+在线模式会把原文/作答发送给你配置的服务。请先确认材料可发送，详见 [安全说明](docs/SECURITY.md)。
 
-- 学习笔记与文件按公开数据处理；**唯一要保护的是 API Key**。
-- 前端 CSP 只允许本地资源与 IPC，不允许任何外联。
-- 本地模式开关：不配 `base_url` 时全部走下线的启发式路径，完全不联网。
-- README 与 [SECURITY.md](docs/SECURITY.md) 明确：界面上出现的正则脱敏只是辅助，不要把未脱敏的隐私内容喂给外部模型。
+## 旧版数据迁移
 
-## 许可
+旧版仓库的 `data/subjects/` 不再是默认运行目录。迁移前关闭应用并完整备份旧库，然后将其中的数据库复制到新目录的 `subjects/`，**不要覆盖同名的新库**。旧 `core/tack.local.json` 需人工转换为上述显式模式配置；不要直接复制含未知字段的旧配置。
 
-MIT，见 [LICENSE](LICENSE)。本仓库不含任何 AGPL 依赖。
+首次打开 v1 库会事务迁移日期到 epoch 秒，保留原文和卡片。旧版曾在复习时覆盖标准答案，因此**旧库中已经复习过的卡会标为待核对**，不自动继续评分。在科目管理里可见，需从原文重新制卡；程序不能凭空恢复已经丢失的标准答案。
+
+## 目前的明确边界
+
+- 不做扫描 PDF 的隐式 OCR；无文本时明确拒绝导入。
+- 单文件上限 50 MB、2000 文本块；在线制卡每次上限 10 块，超限回滚并要求拆分。
+- 离线关键词评分不具备完整语义理解，界面明确标注，不应当作权威判断。
+- 未提供跨设备同步、自动启动、代码签名和自动更新。
+- Windows 本机验收与跨平台 CI 的实际结果见验收文档，不能从“编译通过”推断所有平台 GUI 已通过。
+
+## 测试
+
+```powershell
+cd core
+uv run --frozen python -m unittest discover -s tests -v
+cd ..
+npm test
+npm run build:core
+uv run --project core --frozen python scripts/test-bundled-core.py
+cargo check --locked --manifest-path src-tauri/Cargo.toml
+```
+
+依赖锁：`package-lock.json`、`src-tauri/Cargo.lock`、`core/uv.lock`。CI 在 push/PR 运行回归、冻结内核验证和 Rust 检查；发布工作流必须先通过这些检查。
+
+MIT。依赖的许可分别以其上游声明为准。

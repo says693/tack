@@ -1,48 +1,16 @@
-# 环境配置：先把工具链装齐
+# 构建工具链
 
-沙盒没有 PowerShell 也没有 Windows 包管理器，所以这一层只能在你机器上执行。但我已经用 Linux 版 PowerShell 7.4 把每个脚本**真跑过**，修掉了运行时崩溃（`${env:ProgramFiles(x86)}` 在非 Windows 下为空导致 `Join-Path` 报错），并确认它们在你机器上会走 Windows 分支。
+开发机需安装 Node 24、Rust 1.98 MSVC、uv 0.12.17。Windows 还需 Visual Studio C++ Build Tools 与 WebView2。
 
-## 顺序（只有四步）
+Python 固定为 3.12 系列，由 uv 管理。不要依赖 Windows Store 的 `python.exe` 占位别名；使用 `uv run --project core --frozen python` 或项目虚拟环境。
 
-```powershell
-cd H:\CC小姐
+推荐过程：
 
-# 1. 体检：找出已装/便携版/缺失的六样东西
-powershell -ExecutionPolicy Bypass -File .\check-env.ps1
+1. 检查 `node --version`、`cargo --version`、`uv --version` 均能运行。
+2. 执行 `scripts/setup.ps1`，安装锁定依赖并运行测试。
+3. `npm run dev` 自动构建 Python sidecar，随后运行桌面程序。
+4. `scripts/build-installer.ps1` 生成当前用户 NSIS 安装器。
 
-# 2. 补齐缺的（用 winget，用户级安装，不污染系统）
-powershell -ExecutionPolicy Bypass -File .\tack\scripts\setup-toolchain.ps1 -InstallMissing
+Node 锁文件、Cargo 锁文件和 uv 锁文件都必须随依赖更新提交。不要把失败的安装/编译步骤当成可跳过项。没有完整工具链时，源码检查不等于桌面验收。
 
-# 3. 装项目依赖 + 跑内核单测
-powershell -ExecutionPolicy Bypass -File .\tack\scripts\setup.ps1
-
-# 4. 启动
-powershell -ExecutionPolicy Bypass -File .\tack\scripts\dev.ps1
-```
-
-## 六样东西分别是什么、为什么
-
-| 工具 | 用途 | 安装方式 |
-|---|---|---|
-| Node.js 20+ | 跑 `@tauri-apps/cli` | winget 用户级 |
-| npm | 随 Node | 同上 |
-| Rust stable | 编译 `src-tauri` | `Rustlang.Rustup`，默认 MSVC host |
-| **MSVC Build Tools** | Rust 链接器（唯一可能需要 UAC 的一项） | VS 2022 Build Tools + C++ 工作负载 |
-| Python 3.11+ | 内核、单测、图标生成 | winget 用户级 3.12 |
-| WebView2 | Tauri 运行时 | Win11 自带；Win10 装 Evergreen |
-| Git | 版本管理、发布 | winget 用户级 |
-
-## 如果 winget 失败
-
-`setup-toolchain.ps1` 会逐项打印失败原因，不会中途停。最常见的两种情况：
-
-- **MSVC 需要管理员**：它会提示你开一个管理员 PowerShell，再跑一次它给的那条 `winget install ...`。
-- **刚装完某些工具仍显示 MISSING**：那是当前会话的 PATH 没刷新。关掉窗口重开，再跑 `check-env.ps1`。脚本末尾也会自动从注册表重载一次 PATH。
-
-## 你已有便携版的情况
-
-`check-env.ps1` 会扫 `C:\tools`、`C:\dev`、`D:\tools`、`scoop`、`%LOCALAPPDATA%\Programs`、`%USERPROFILE%\.cargo\bin` 等位置，深度 4 层找 `node.exe` / `cargo.exe` / `python.exe` / `git.exe`。找到的会直接复用，并在报告中打印完整路径。你的那个"配好过其他软件"的文件夹如果不在上面清单里，把它加进脚本顶部的 `$roots` 数组即可。
-
-## 验证点
-
-跑完第 2 步再跑一次 `check-env.ps1`，六行全 OK 就对了。第 3 步会打印内核 6 项单测结果（应全 OK）。第 4 步右下角出现胶囊，单击开主窗。
+`check-env.ps1` 与 `setup-toolchain.ps1` 是旧版辅助脚本，不是 CI 或验收依据；它们不负责锁定依赖。实际安装版本以本页和工作流为准。

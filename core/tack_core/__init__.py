@@ -5,4 +5,4 @@
     from tack_core import store, ingest, quiz, grade, schedule
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"

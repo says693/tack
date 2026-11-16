@@ -1,105 +1,85 @@
-"""配置与密钥。
-
-原则：
-- data/ 目录零密钥。
-- Key 只从两处来：环境变量（TACK_API_KEY / DEEPSEEK_API_KEY），
-  或 Windows 凭据管理器（target = "tack/llm"，由 keyring 读取）。
-- 模型端点写在 core/tack.local.json（已 gitignore），或直接给环境变量 TACK_BASE_URL。
-"""
-
+"""Explicit modes and app-owned configuration. No implicit credential borrowing."""
 from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
+from urllib.parse import urlsplit
 
-ROOT = Path(__file__).resolve().parents[2]          # repo 根
-DATA_DIR = Path(os.environ.get("TACK_DATA_DIR", ROOT / "data"))
+from platformdirs import user_data_path
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+DATA_DIR = Path(os.environ.get("TACK_DATA_DIR", user_data_path("app.tack.desktop", appauthor=False, roaming=True)))
 SUBJECT_DIR = DATA_DIR / "subjects"
-LOCAL_CFG = Path(__file__).resolve().parents[1] / "tack.local.json"
-
-DEFAULTS = {
-    "llm": {
-        "base_url": "",
-        "model": "deepseek-chat",
-        "fast_model": "deepseek-chat",
-        "timeout_s": 60,
-    },
-    "learn": {
-        "chunk_chars": 800,
-        "chunk_overlap": 120,
-        "quiz_per_review": 1,
-        "daily_limit": 30,
-    },
-}
+LOCAL_CFG = DATA_DIR / "config.json"
 
 
-@dataclass
-class LLMConfig:
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class LLMConfig(StrictModel):
+    mode: Literal["offline", "online"] = "offline"
     base_url: str = ""
     model: str = "deepseek-chat"
     fast_model: str = "deepseek-chat"
-    timeout_s: int = 60
+    timeout_s: int = Field(default=60, ge=1, le=120)
+
+    @model_validator(mode="after")
+    def validate_endpoint(self):
+        if self.mode == "online":
+            url = urlsplit(self.base_url)
+            if url.scheme != "https" or not url.hostname or url.username or url.password:
+                raise ValueError("在线模式必须配置不含账号密码的 HTTPS base_url")
+            if not self.model.strip() or not self.fast_model.strip():
+                raise ValueError("模型名称不能为空")
+        return self
 
 
-@dataclass
-class LearnConfig:
-    chunk_chars: int = 800
-    chunk_overlap: int = 120
-    quiz_per_review: int = 1
-    daily_limit: int = 30
+class LearnConfig(StrictModel):
+    chunk_chars: int = Field(default=800, ge=50, le=4000)
+    chunk_overlap: int = Field(default=120, ge=0)
+    daily_limit: int = Field(default=30, ge=1, le=200)
+
+    @model_validator(mode="after")
+    def validate_overlap(self):
+        if self.chunk_overlap >= self.chunk_chars:
+            raise ValueError("chunk_overlap 必须小于 chunk_chars")
+        return self
 
 
-@dataclass
-class Config:
-    llm: LLMConfig = field(default_factory=LLMConfig)
-    learn: LearnConfig = field(default_factory=LearnConfig)
+class Config(StrictModel):
+    llm: LLMConfig = Field(default_factory=LLMConfig)
+    learn: LearnConfig = Field(default_factory=LearnConfig)
 
     @property
     def online(self) -> bool:
-        """有 base_url 且拿得到 key 才算在线；否则全部走本地启发式。"""
-        return bool(self.llm.base_url) and bool(read_api_key())
-
-
-def _deep_merge(base: dict, over: dict) -> dict:
-    out = dict(base)
-    for k, v in over.items():
-        if isinstance(v, dict) and isinstance(out.get(k), dict):
-            out[k] = _deep_merge(out[k], v)
-        else:
-            out[k] = v
-    return out
+        return self.llm.mode == "online"
 
 
 def load() -> Config:
-    raw = json.loads(json.dumps(DEFAULTS))
-    if LOCAL_CFG.exists():
-        try:
-            raw = _deep_merge(raw, json.loads(LOCAL_CFG.read_text("utf-8")))
-        except (OSError, json.JSONDecodeError) as exc:
-            print(f"[tack] tack.local.json 读不动，按默认配置跑：{exc}")
-    if os.environ.get("TACK_BASE_URL"):
-        raw["llm"]["base_url"] = os.environ["TACK_BASE_URL"]
-    if os.environ.get("TACK_MODEL"):
-        raw["llm"]["model"] = os.environ["TACK_MODEL"]
-    return Config(
-        llm=LLMConfig(**{k: raw["llm"].get(k, v) for k, v in DEFAULTS["llm"].items()}),
-        learn=LearnConfig(**{k: raw["learn"].get(k, v) for k, v in DEFAULTS["learn"].items()}),
-    )
+    raw = json.loads(LOCAL_CFG.read_text("utf-8")) if LOCAL_CFG.exists() else {}
+    if not isinstance(raw, dict):
+        raise ValueError("配置必须是 JSON 对象")
+    llm = raw.setdefault("llm", {})
+    if not isinstance(llm, dict):
+        raise ValueError("llm 必须是 JSON 对象")
+    for env, field in (("TACK_MODE", "mode"), ("TACK_BASE_URL", "base_url"), ("TACK_MODEL", "model")):
+        if env in os.environ:
+            llm[field] = os.environ[env]
+    if llm.get("base_url") and "mode" not in llm:
+        raise ValueError("配置了模型端点时必须明确设置 llm.mode 为 online 或 offline")
+    return Config.model_validate(raw)
 
 
 def read_api_key() -> str:
-    for env in ("TACK_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY"):
-        v = os.environ.get(env, "").strip()
-        if v:
-            return v
-    try:
-        import keyring  # 可选依赖；没装就静默跳过
-
-        return (keyring.get_password("tack", "llm") or "").strip()
-    except Exception:
-        return ""
+    value = os.environ.get("TACK_API_KEY", "").strip()
+    if value:
+        return value
+    import keyring
+    # Credential-store errors must not change the selected mode.
+    return (keyring.get_password("tack", "llm") or "").strip()
 
 
 def ensure_dirs() -> None:

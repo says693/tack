@@ -2,9 +2,9 @@
 
 顺序：
 1. 在线：让模型读章块，产出一句话提炼 + 一道题 + 采分点（JSON）。
-2. 离线/失败：取标题和首句做提炼，题目固定为"用自己的话复述下面的要点"。
+2. 显式离线模式：取标题和首句做提炼，题目为"用自己的话复述下面的要点"。
 
-两种路径产出的卡结构一致，后续批改、调度都不感知差异。
+在线失败直接报错，不进入离线制卡。
 """
 
 from __future__ import annotations
@@ -12,7 +12,16 @@ from __future__ import annotations
 import re
 import sqlite3
 
-from . import llm
+from pydantic import Field
+from . import config, llm
+
+
+class CardDraft(config.StrictModel):
+    title: str = Field(min_length=1, max_length=60)
+    line: str = Field(min_length=1, max_length=4000)
+    prompt: str = Field(min_length=1, max_length=4000)
+    answer: str = Field(min_length=1, max_length=4000)
+    tier: int = Field(ge=1, le=3)
 
 SYSTEM = (
     "You are a concise study coach. Read the passage and produce ONE active-recall card. "
@@ -30,24 +39,12 @@ def card_from_chunk(chunk: dict) -> dict:
     heading = re.sub(r"\s+", " ", (chunk.get("heading") or "")).strip()
 
     if llm.available():
-        user = f"章节：{heading or '（无标题）'}\n\n{body[:1400]}"
+        user = f"章节：{heading or '（无标题）'}\n\n{body}"
         data = llm.chat_json(SYSTEM, user)
-        if data:
-            title = str(data.get("title") or heading or body[:12])[:30]
-            line = str(data.get("line") or _first_sentence(body))
-            prompt = str(data.get("prompt") or _fallback_prompt(heading))
-            answer = str(data.get("answer") or line)
-            try:
-                tier = int(data.get("tier") or 3)
-            except (TypeError, ValueError):
-                tier = 3
-            return {
-                "title": title,
-                "line": line,
-                "prompt": prompt,
-                "answer": answer,
-                "tier": min(3, max(1, tier)),
-            }
+        try:
+            return CardDraft.model_validate(data).model_dump()
+        except Exception as exc:
+            raise llm.ModelError("模型制卡结构不合法；本次导入未提交") from exc
 
     return {
         "title": (heading or _first_sentence(body))[:14].strip(),
@@ -92,7 +89,8 @@ def _fallback_prompt(heading: str) -> str:
 
 def draft_cards_for_doc(conn: sqlite3.Connection, doc_id: int) -> list[dict]:
     rows = conn.execute(
-        "SELECT id, heading, body FROM chunks WHERE doc_id = ? ORDER BY ord", (doc_id,)
+        """SELECT c.id, c.heading, c.body FROM chunks c JOIN documents d ON d.id=c.doc_id
+           WHERE c.doc_id = ? AND c.version=d.current_version ORDER BY c.ord""", (doc_id,)
     ).fetchall()
     out = []
     for r in rows:

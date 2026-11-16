@@ -1,17 +1,10 @@
-"""模型层：任何 OpenAI 兼容端点，走 LiteLLM；没有就优雅地返回 None。
-
-设计要点：
-- 在线/离线同一条代码路径：调用方拿到 None 就自己走启发式，不抛异常。
-- 只做一次调用拿结构化结果；不重试到天荒地老（离线优先的产品）。
-- Key 永不落盘；这里只读 config.read_api_key()。
-"""
-
-from __future__ import annotations
-
+"""One explicit online path. Failure never triggers local grading."""
 import json
-import re
-
 from . import config
+
+
+class ModelError(RuntimeError):
+    pass
 
 
 def available() -> bool:
@@ -19,66 +12,34 @@ def available() -> bool:
 
 
 def _client():
-    try:
-        from openai import OpenAI  # LiteLLM 的 1.x 底层也用这个形态；二者接口一致
-    except ImportError:
-        try:
-            from litellm import completion as _completion  # noqa: F401
-
-            return "litellm"
-        except ImportError:
-            return None
+    from openai import OpenAI
     cfg = config.load().llm
-    return OpenAI(base_url=cfg.base_url, api_key=config.read_api_key(), timeout=cfg.timeout_s)
+    key = config.read_api_key()
+    if not key:
+        raise ModelError("在线模式未配置 tack 专用 API Key")
+    return OpenAI(base_url=cfg.base_url, api_key=key, timeout=cfg.timeout_s, max_retries=0)
 
 
-def chat(system: str, user: str, *, fast: bool = False, json_mode: bool = False) -> str | None:
-    """返回纯文本；不可用或出错返回 None。"""
+def chat_json(system: str, user: str, *, fast: bool = False) -> dict:
     cfg = config.load()
-    if not config.load().online:
-        return None
-    model = cfg.llm.fast_model if fast else cfg.llm.model
-    client = _client()
-    if client is None:
-        return None
-
-    kwargs = dict(
-        model=model,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        temperature=0.3,
-    )
-    if json_mode:
-        kwargs["response_format"] = {"type": "json_object"}
-
+    if not cfg.online:
+        raise ModelError("离线模式不能调用在线模型")
     try:
-        if client == "litellm":
-            from litellm import completion
-
-            resp = completion(**kwargs)
-            return resp.choices[0].message.content
-        resp = client.chat.completions.create(**kwargs)
-        return resp.choices[0].message.content
-    except Exception as exc:  # 网络/额度/模型名错误都收敛成"离线"
-        print(f"[tack] 模型暂不可用，走本地启发式：{exc.__class__.__name__}: {exc}")
-        return None
-
-
-def chat_json(system: str, user: str, *, fast: bool = False) -> dict | None:
-    raw = chat(system, user, fast=fast, json_mode=True)
-    if not raw:
-        return None
-    raw = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.M).strip()
-    try:
+        with _client() as client:
+            response = client.chat.completions.create(
+                model=cfg.llm.fast_model if fast else cfg.llm.model,
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                temperature=0.3, response_format={"type": "json_object"},
+            )
+        raw = response.choices[0].message.content
+        if not isinstance(raw, str):
+            raise ModelError("模型没有返回文本")
         data = json.loads(raw)
-    except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", raw, re.S)
-        if not m:
-            return None
-        try:
-            data = json.loads(m.group(0))
-        except json.JSONDecodeError:
-            return None
-    return data if isinstance(data, dict) else None
+        if not isinstance(data, dict):
+            raise ModelError("模型必须返回 JSON 对象")
+        return data
+    except ModelError:
+        raise
+    except Exception as exc:
+        # Provider response bodies/headers can include credentials.
+        raise ModelError(f"模型调用失败（{type(exc).__name__}）；本次结果未保存，请检查配置后重试") from exc

@@ -5,12 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>tack · 锚点</title>
   <link rel="stylesheet" href="styles/tack.css" />
+  <link rel="stylesheet" href="styles/windows.css" />
   <link rel="stylesheet" href="styles/anchor.css" />
   <link rel="stylesheet" href="styles/menus.css" />
 </head>
 <body class="anchor">
   <div class="anchor-shell" id="shell">
-    <header class="anchor-top drag">
+    <header class="anchor-top drag" data-tauri-drag-region>
       <span class="pinhead no-drag"></span>
       <span class="tag tag-fork no-drag"></span>
       <button class="anchor-close no-drag" id="btn-x" title="丢弃">
@@ -23,10 +24,12 @@
 
       <div class="name-field" id="name-field">
         <label for="name">给它起个名字（就是一次提取练习）</label>
-        <input id="name" type="text" maxlength="24" spellcheck="false" autocomplete="off" />
+        <input id="name" type="text" maxlength="60" spellcheck="false" autocomplete="off" />
       </div>
 
       <h1 class="anchor-line" id="line"></h1>
+      <p id="save-status" role="status" aria-live="polite"></p>
+      <p id="anchor-error" class="error-banner" role="alert" hidden></p>
 
       <hr class="hair anchor-rule" />
 

@@ -1,671 +1,299 @@
-/*
- * tack · 主窗逻辑（G0 骨架，数据为内置演示）
- * 真数据接线点已用 DATA_SOURCE 标出，后续接 Python 内核时只换这里。
- */
-
+/* Real application state. Successful UI states follow committed core operations. */
 (function () {
+  "use strict";
   const b = window.tackBridge;
-  const say = (t) => window.notify(t);
-
-  /* ---------- 演示数据 ---------- */
-
-  const DATA_SOURCE = "demo"; // 之后改为 "db"：由内核经 IPC 推 due 卡列表，这里只负责渲染
-
-  const SUBJECTS = ["生物 · 细胞与能量", "微积分 · 级数与收敛", "近代史 · 条约与秩序"];
-
-  const CARDS = [
-    {
-      title: "钠钾泵为什么属于主动运输",
-      parent:
-        "钠钾泵每消耗一分子 ATP，把 3 个 Na⁺ 泵出细胞、2 个 K⁺ 泵入细胞，逆浓度梯度进行，因此是主动运输。",
-      tier: "1",
-      due: "今天",
-      state: "new",
-      keys: ["atp", "na", "k", "梯度", "浓度"],
-      points: [
-        "方向逆浓度梯度——这是主动运输的判据",
-        "能量来自 ATP 水解，而非顺浓度差",
-        "3 Na⁺ 出、2 K⁺ 入，比例决定电性",
-      ],
-    },
-    {
-      title: "ATP 为什么叫能量货币",
-      parent:
-        "ATP 只在酶的作用下按需水解，释放的能量用于吸能反应；细胞像花钱一样花 ATP，而不是一次性烧掉全部能量。",
-      tier: "2",
-      due: "今天",
-      state: "learning",
-      keys: ["水解", "酶", "吸能", "磷酸"],
-      points: [
-        "按需水解，能量分次释放",
-        "高能磷酸键的断裂是可逆循环的一环",
-        "与吸能反应直接耦合",
-      ],
-    },
-    {
-      title: "有氧呼吸第二阶段的场所",
-      parent:
-        "在线粒体基质中，丙酮酸被彻底分解为 CO₂，并与 NAD⁺ 结合生成 NADH，同时释放少量能量。",
-      tier: "3",
-      due: "今天",
-      state: "learning",
-      keys: ["线粒体基质", "丙酮酸", "co2", "nadh"],
-      points: [
-        "第二阶段在基质，不是内膜",
-        "丙酮酸全程被彻底氧化",
-        "少量 ATP 与大量 NADH 同时产生",
-      ],
-    },
-    {
-      title: "光反应把光能变成了什么",
-      parent:
-        "光反应在水解水的过程中把光能转化为 ATP 和 NADPH 中的活跃化学能，供暗反应碳固定使用。",
-      tier: "2",
-      due: "今天",
-      state: "review",
-      keys: ["atp", "nadph", "水解", "光能"],
-      points: [
-        "光能先变成活跃化学能而不直接变成糖",
-        "ATP 与 NADPH 是暗反应的原料",
-        "水的光解同时释放氧气",
-      ],
-    },
-  ];
-
-  /* ---------- 状态 ---------- */
-
-  const state = {
-    index: 0,
-    subjectIndex: 0,
-    cards: CARDS.map((c) => ({ ...c, verdict: null, answering: false })),
-  };
-
-  const $ = (id) => document.getElementById(id);
+  const $ = id => document.getElementById(id);
   const stream = $("stream");
+  const drafts = new Map();
+  const pending = new Map();
+  const state = {subject: null, subjects: [], cards: [], index: 0, due: 0,
+    mode: "offline", suspended: [], nextDue: null, busy: false, ready: false, renderedSubject: null};
+  const escape = value => String(value ?? "").replace(/[&<>"']/g,
+    c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const keyFor = card => `${state.subject}:${card.id}`;
+  const active = () => state.cards[state.index];
+  const formatDate = value => new Date(value * 1000).toLocaleString("zh-CN");
 
-  /* ---------- 渲染 ---------- */
-
-  function todayText() {
-    const d = new Date();
-    const wd = "日一二三四五六"[(d.getDay() + 7) % 7];
-    return `${d.getMonth() + 1} 月 ${d.getDate()} 日 · 周${wd}`;
-  }
-
-  function esc(s) {
-    return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  }
-
-  const PIN_SVG =
-    '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><path d="M7.4 1.2l3.4 3.4-1.6.4-2 2 .4 2.6-1.2 1.2-2.3-2.3L1.6 11l-.9-.9 2.6-2.6L1 5.2 2.2 4l2.6.4 2-2 .6-1.2z"/></svg>';
-
-  const TAG_BY_STATE = { new: "[S]", learning: "", review: "[T1]" };
-
-  function cardHTML(card, i) {
-    const focus = i === state.index;
-    return `
-      <article class="card ${focus ? "is-focus" : ""}" data-tier="${card.tier}" data-index="${i}" tabindex="0" role="button" aria-label="复习卡：${esc(card.title)}">
-        <div class="card-top">
-          <span class="card-num">No.${String(i + 1).padStart(2, "0")}</span>
-          <div class="card-tags">
-            ${card.verdict ? '<span class="tag tag-pin-label"></span>' : ""}
-            ${TAG_BY_STATE[card.state] ? `<span class="tag">${TAG_BY_STATE[card.state]}</span>` : ""}
-            <span class="tier-dot" title="知识层级 T${card.tier}"></span>
-          </div>
-        </div>
-        <h2 class="card-title">${esc(card.title)}</h2>
-        <p class="card-parent">${esc(card.parent)}</p>
-        <div class="card-meta">
-          <span>${card.due}</span><i class="dot"></i><span>T${card.tier}</span><i class="dot"></i><span>第 ${i + 1} 天</span>
-        </div>
-        ${focus ? answerHTML(card) : ""}
-        <button class="card-pin" title="钉住这张卡" tabindex="-1">${PIN_SVG}</button>
-      </article>`;
-  }
-
-  function answerHTML(card) {
-    if (card.verdict) {
-      const good = card.verdict.score >= 2;
-      return `
-        <div class="answer-zone">
-          <div class="verdict">
-            <b>${good ? "答对了 · 就钉在这里" : "差一点 · 再看一眼"}</b>
-            ${card.verdict.notes.map((n) => esc(n)).join("<br>")}
-          </div>
-          <div class="answer-actions">
-            <button class="btn" data-act="pause">稍后</button>
-            <button class="btn btn-pin" data-act="next">下一张</button>
-          </div>
-        </div>`;
+  function error(err) {
+    $("error").textContent = err?.message || String(err);
+    $("error").hidden = false;
+    const modal = document.querySelector("dialog[open]");
+    if (modal) {
+      let message = modal.querySelector(".dialog-error");
+      if (!message) { message=document.createElement("p"); message.className="dialog-error error-banner"; message.setAttribute("role","alert"); modal.append(message); }
+      message.textContent = $("error").textContent;
     }
-    return `
-      <div class="answer-zone">
-        <textarea placeholder="用自己的话写下来，越短越好" aria-label="你的答案"></textarea>
-        <div class="answer-actions">
-          <button class="btn" data-act="hint">提示</button>
-          <button class="btn btn-pin" data-act="check">交卷</button>
-        </div>
-      </div>`;
   }
-
-  function syncChrome() {
-    const total = state.cards.length;
-    const pct = total ? Math.round(((state.index + 1) / total) * 100) : 0;
-    $("progress").style.width = pct + "%";
-    $("stepper").textContent = `${Math.min(state.index + 1, total)} / ${total}`;
-    $("day-date").textContent = todayText();
-    $("subject").querySelector("span").textContent = SUBJECTS[state.subjectIndex];
-    document.title = `tack · ${SUBJECTS[state.subjectIndex]}`;
-    b.invoke("notify_hud", {
-      due: Math.max(0, total - state.index),
-      mode: "flow",
-    }).catch(() => {});
+  function busy(on) {
+    state.busy = on;
+    $("shell").setAttribute("aria-busy", String(on));
+    document.querySelectorAll(".data-control").forEach(el => { el.disabled = on; });
+    $("subject").disabled = on || !state.ready;
+    $("btn-solid").disabled = on || !active();
+    $("btn-later").disabled = on || !active();
   }
-
+  async function run(task) {
+    if (state.busy) return;
+    $("error").hidden = true;
+    busy(true);
+    try { await task(); } catch (err) { error(err); }
+    finally { busy(false); }
+  }
+  async function write(op, args = {}) {
+    const body = {op, subject: state.subject, ...args};
+    const signature = JSON.stringify(body);
+    if (!pending.has(signature)) pending.set(signature, crypto.randomUUID());
+    const result = await b.core({...body, request_id: pending.get(signature)});
+    pending.delete(signature);
+    return result;
+  }
+  function chrome() {
+    const name = state.subjects.find(s => s.slug === state.subject)?.name || "我的学习";
+    $("subject").querySelector("span").textContent = name;
+    $("subject").disabled = state.busy || !state.ready;
+    document.title = `tack · ${name}`;
+    $("day-date").textContent = new Date().toLocaleDateString("zh-CN", {month:"long",day:"numeric",weekday:"short"});
+    $("day-tag").textContent = state.mode === "online" ? "在线模型" : "离线 · 关键词近似";
+    $("stepper").textContent = state.due ? `待复习 ${state.due}` : "完成";
+    $("progress").style.width = state.due ? "0%" : "100%";
+    b.invoke("notify_hud", {due: state.due, mode: state.mode}).catch(error);
+  }
+  function cardHTML(card, index) {
+    const focus = index === state.index;
+    const result = card.verdict;
+    return `<article class="card ${focus ? "is-focus" : ""}" data-tier="${card.tier}" data-id="${card.id}" tabindex="0"
+               aria-label="复习卡：${escape(card.title)}">
+      <div class="card-top"><span class="card-num">No.${card.id}</span><span class="card-tags">T${card.tier}</span></div>
+      <h2 class="card-title">${escape(card.title)}</h2>
+      <p class="question">${escape(card.prompt)}</p>
+      <details class="source"><summary>查看原文与来源</summary><p class="card-parent">${escape(card.parent)}</p>
+        <p>${escape(card.source)}</p></details>
+      ${focus ? `<div class="answer-zone">${result
+        ? `<div class="verdict" role="status"><b>${result.score}/3 · ${result.method === "offline" ? "离线近似评分" : result.method === "self" ? "自评" : "在线评分"}</b>
+             ${result.notes.map(escape).join("<br>")}<p>下次复习：${formatDate(result.due_at)}</p></div>
+             <button class="btn btn-pin data-control" data-act="next">下一张</button>`
+        : `<textarea class="data-control" aria-label="你的答案" maxlength="8000" placeholder="用自己的话写下来">${escape(drafts.get(keyFor(card)) || "")}</textarea>
+             <div class="answer-actions"><button class="btn" data-act="hint">查看提示</button>
+             <button class="btn btn-pin data-control" data-act="check">交卷</button></div>`}</div>` : ""}
+      <button class="card-pin data-control" aria-label="从原文钉新卡" title="从原文钉新卡" data-act="pin">钉</button>
+    </article>`;
+  }
   function render() {
-    stream.innerHTML = state.cards.length
-      ? state.cards.map(cardHTML).join("")
-      : `<div class="empty">
-           <p class="empty-title">今天没有要复习的卡</p>
-           <p class="empty-hint">把教材拖进来，或者按住任意一段文字 450ms 钉一张新卡。</p>
-         </div>`;
-    syncChrome();
-    wireCardEvents();
-    const focusEl = stream.querySelector(".card.is-focus");
-    if (focusEl && "scrollIntoView" in focusEl) {
-      focusEl.scrollIntoView({ block: "nearest" });
-    }
+    state.renderedSubject = state.subject;
+    stream.innerHTML = state.cards.length ? state.cards.map(cardHTML).join("") :
+      `<div class="empty"><p class="empty-title">今天没有待复习的卡</p>
+       <p class="empty-hint">${state.nextDue ? `下次复习：${formatDate(state.nextDue)}` : "导入 PDF、Markdown 或文本文件，生成真正保存的学习卡。"}</p></div>`;
+    chrome();
+    busy(state.busy);
   }
-
-  /* ---------- 批改（离线启发式，G0 用） ---------- */
-
-  function heuristicGrade(card, answer) {
-    const a = answer.toLowerCase();
-    const hit = card.keys.filter((k) => a.includes(k.toLowerCase()));
-    const score = Math.min(3, hit.length);
-    if (score >= 2) {
-      return { score, notes: card.points };
-    }
-    const missing = card.keys.filter((k) => !a.includes(k.toLowerCase())).slice(0, 2);
-    const notes = [
-      "答案里缺了：" + (missing.length ? missing.join("、") : "关键的一环") + "。",
-      "参考这条：" + card.points[0],
-    ];
-    return { score, notes };
+  async function refresh(quiet = false) {
+    if (!state.subject) return;
+    const subject = state.subject;
+    const snap = await b.core({op:"snapshot",subject});
+    if (subject !== state.subject || (quiet && !canQuietRefresh())) return;
+    const currentId = active()?.id;
+    const changed = state.renderedSubject !== subject || JSON.stringify(state.cards) !== JSON.stringify(snap.cards);
+    state.cards = snap.cards;
+    state.due = snap.due; state.mode = snap.mode;
+    state.suspended = snap.suspended; state.nextDue = snap.next_due;
+    state.index = Math.max(0, state.cards.findIndex(c => c.id === currentId));
+    if (changed) render();
+    else chrome();
   }
-
-  /* ---------- 交互 ---------- */
-
-  function wireCardEvents() {
-    stream.querySelectorAll(".card").forEach((el) => {
-      const idx = Number(el.dataset.index);
-      el.addEventListener("click", (e) => {
-        if (e.target.closest("button, textarea")) return;
-        if (idx !== state.index) {
-          state.index = idx;
-          render();
-        }
-      });
-
-      el.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (idx !== state.index) {
-          state.index = idx;
-          render();
-        }
-        cardMenu(e.clientX, e.clientY, state.index);
-      });
-
-      const pinBtn = el.querySelector(".card-pin");
-      if (pinBtn) {
-        pinBtn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          if (idx !== state.index) {
-            state.index = idx;
-            render();
-          }
-          pinCard(state.cards[state.index], stream.querySelector(".card.is-focus"));
-        });
-      }
-
-      el.querySelectorAll("[data-act]").forEach((btn) => {
-        btn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          act(idx, btn.dataset.act, el);
-        });
-      });
-    });
+  async function subjects() {
+    const result = await b.core({op:"subjects"});
+    state.subjects = result.subjects;
+    if (!state.subjects.some(s => s.slug === state.subject)) state.subject = state.subjects[0]?.slug;
+    $("data-location").textContent = `数据：${result.data_dir}\n配置：${result.config_file}`;
   }
-
-  /* ---------- 右键菜单 ---------- */
-
-  function cardMenu(x, y, idx) {
-    const card = state.cards[idx];
+  async function review(kind) {
+    const card = active();
     if (!card) return;
-    const reviewing = !!card.verdict;
-    window.openMenu(x, y, [
-      {
-        label: "钉住这张卡",
-        hint: "P",
-        run: () => {
-          const el = stream.querySelector(".card.is-focus");
-          pinCard(card, el);
-          say("已钉住 · 明天先回看");
-        },
-      },
-      {
-        label: reviewing ? "再练一次" : "现在练习一次",
-        hint: "Enter",
-        run: () => {
-          card.verdict = null;
-          render();
-          const ta = stream.querySelector(".card.is-focus textarea");
-          if (ta) ta.focus();
-        },
-      },
-      { sep: true },
-      {
-        label: "今晚再看",
-        hint: "L",
-        run: () => {
-          card.due = "今晚";
-          render();
-          say("已排到今晚 20:00");
-        },
-      },
-      {
-        label: reviewing ? "明天再来" : "跳过这张",
-        hint: "S",
-        run: () => {
-          state.cards.splice(idx, 1);
-          state.index = Math.min(state.index, state.cards.length - 1);
-          render();
-          say("已挪到明天");
-        },
-      },
-      { sep: true },
-      {
-        label: "放下这张卡",
-        danger: true,
-        run: () => {
-          state.cards.splice(idx, 1);
-          state.index = Math.min(state.index, state.cards.length - 1);
-          render();
-          say("已放下 · 想它回来就重新拖动原文");
-        },
-      },
+    if (card.verdict) { await refresh(); return; }
+    const answer = drafts.get(keyFor(card)) || "";
+    if (kind === "answer" && !answer.trim()) throw new Error("请先填写答案。");
+    const result = await write("review", {card_id:card.id,answer,kind});
+    drafts.delete(keyFor(card));
+    if (kind === "remembered") { await refresh(); return; }
+    card.verdict = result;
+    const snap = await b.core({op:"snapshot",subject:state.subject});
+    state.due = snap.due;
+    render();
+    $("foot-hint").textContent = "评分与复习记录已保存；按下一张继续。";
+  }
+  async function postpone(when) {
+    if (!active()) return;
+    const result = await write("defer", {card_id:active().id,when});
+    await refresh();
+    $("foot-hint").textContent = `已安排：${formatDate(result.due_at)}`;
+  }
+  async function openAnchor(text) {
+    const card = active();
+    await b.invoke("open_anchor", {seed:{subject:state.subject,selected:text,
+      title:(card?.title || "新概念").slice(0,60),parent:card?.parent || text}});
+  }
+  async function act(action) {
+    const card = active();
+    if (!card) return;
+    if (action === "check") await review("answer");
+    else if (action === "next") {
+      if (card.verdict) await refresh();
+      else { state.index=(state.index+1)%state.cards.length; render(); }
+    }
+    else if (action === "hint") {
+      window.notify(card.line);
+    } else if (action === "pin") {
+      await openAnchor(card.parent);
+    }
+  }
+  stream.addEventListener("input", e => {
+    if (e.target.matches("textarea") && active()) drafts.set(keyFor(active()), e.target.value);
+  });
+  stream.addEventListener("click", e => {
+    const cardEl = e.target.closest(".card");
+    if (!cardEl || state.busy) return;
+    const index = state.cards.findIndex(c => c.id === Number(cardEl.dataset.id));
+    const button = e.target.closest("[data-act]");
+    if (button) { state.index=index; run(() => act(button.dataset.act)); return; }
+    if (e.target.closest("textarea,button,summary,details")) return;
+    if (index !== state.index) { state.index=index; render(); }
+  });
+  stream.addEventListener("contextmenu", e => {
+    if (e.target.closest("textarea,input") || state.busy) return;
+    const cardEl = e.target.closest(".card");
+    if (!cardEl) return;
+    e.preventDefault(); e.stopPropagation();
+    state.index = state.cards.findIndex(c => c.id === Number(cardEl.dataset.id));
+    render();
+    window.openMenu(e.clientX,e.clientY,[
+      {label:"从原文钉新卡",run:() => run(() => openAnchor(active().parent))},
+      {label:"今晚 20:00 再看",run:() => run(() => postpone("tonight"))},
+      {label:"明天再看",run:() => run(() => postpone("tomorrow"))},
+      {label:"暂停复习（可恢复）",run:() => run(async()=>{
+        await write("suspend",{card_id:active().id}); await refresh();
+      })},
     ]);
-  }
-
-  function subjectMenu(x, y) {
-    const items = SUBJECTS.map((name, i) => ({
-      label: name,
-      checked: i === state.subjectIndex,
-      run: () => {
-        state.subjectIndex = i;
-        syncChrome();
-        say("已切到 " + name);
-      },
-    }));
-    items.push(
-      { sep: true },
-      { label: "Ctrl+Tab 循环切换", disabled: true, run: null }
-    );
-    window.openMenu(x, y, items);
-  }
-
-  /* ---------- 过卡动作 ---------- */
-
-  function act(idx, action, cardEl) {
-    const card = state.cards[idx];
-    if (!card || !cardEl) return;
-    const ta = cardEl.querySelector("textarea");
-
-    if (action === "check") {
-      const answer = (ta?.value || "").trim();
-      if (!answer) {
-        if (ta) {
-          ta.focus();
-          ta.placeholder = "先写一句再交卷，哪怕只有半句";
-        }
-        return;
+  });
+  async function importPaths(paths) {
+    if (!Array.isArray(paths) || !paths.length) return;
+    let count = 0;
+    try {
+      for (const path of paths) {
+        $("foot-hint").textContent = `正在导入 ${count + 1}/${paths.length}；完成前请勿退出`;
+        await write("import", {path});
+        count++;
       }
-      card.verdict = heuristicGrade(card, answer);
-      card.state = card.verdict.score >= 2 ? "review" : "learning";
-      render();
-      return;
-    }
-
-    if (action === "next") {
-      if (idx + 1 < state.cards.length) {
-        state.index = idx + 1;
-        render();
-      } else {
-        finishDay();
-      }
-      return;
-    }
-
-    if (action === "hint") {
-      if (ta) {
-        ta.value = card.points[0];
-        ta.focus();
-      }
-      return;
-    }
-
-    if (action === "pause") {
-      state.cards.splice(idx, 1);
-      state.index = Math.min(state.index, state.cards.length - 1);
-      render();
-    }
+      $("foot-hint").textContent = `${count} 个文件已导入并保存，重复导入不会重复制卡`;
+    } catch (err) {
+      throw new Error(`已完成 ${count}/${paths.length} 个文件。当前文件失败：${err?.message || err}`);
+    } finally { await refresh(); }
   }
-
-  function finishDay() {
-    stream.innerHTML = `
-      <div class="empty">
-        <p class="tag tag-ready"></p>
-        <p class="empty-title">今天的线走完了</p>
-        <p class="empty-hint">错的卡会在明天先出现，对的卡往后挪。明早这里自动铺开。</p>
-      </div>`;
-    $("progress").style.width = "100%";
-    $("stepper").textContent = "完成";
-    $("foot-hint").textContent = "今天到此为止";
-    $("btn-solid").disabled = true;
-    b.invoke("notify_hud", { due: 0, mode: "ready" }).catch(() => {});
-  }
-
-  /* ---------- 长按开钉 ---------- */
-
-  function openAnchor(text, pointer) {
-    const card = state.cards[state.index];
-    b.invoke("open_anchor", {
-      selected: text,
-      title: card ? card.title : "新概念",
-      parent: card ? card.parent.slice(0, 500) : "",
-      prev: "上一轮：你把它归到了 T" + (card ? card.tier : "2"),
-      next: "下一轮：明天先回看这一张",
-    }).catch((err) => console.warn("open_anchor:", err));
-
-    if (!b.hasTauri) {
-      // 浏览器预览：用一个小悬浮窗模拟锚点窗，方便调 UI
-      previewAnchor(text, card, pointer);
-    }
-  }
-
-  function previewAnchor(text, card, pointer) {
-    document.querySelectorAll(".preview-anchor").forEach((n) => n.remove());
-    const el = document.createElement("aside");
-    el.className = "preview-anchor";
-    el.style.cssText = `
-      position:fixed;z-index:50;width:272px;min-height:260px;
-      left:${Math.min((pointer?.x ?? 200) + 20, innerWidth - 292)}px;
-      top:${Math.min((pointer?.y ?? 120), innerHeight - 300)}px;
-      background:var(--paper-raised);border:1px solid var(--hair);
-      border-radius:14px;box-shadow:0 12px 40px rgba(30,28,25,.18);
-      padding:14px 16px;font-size:12px;color:var(--ink-soft)`;
-    el.innerHTML = `
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-        <span class="pinhead" style="transform:scale(.8)"></span>
-        <span class="tag tag-fork"></span>
-        <span style="margin-left:auto;color:var(--ink-faint);font-family:var(--font-data);font-size:10px">预览</span>
-      </div>
-      <div style="font-family:var(--font-display);font-size:16px;font-weight:600;line-height:1.5;color:var(--ink)">${esc(text)}</div>
-      <div class="hair" style="margin:12px 0"></div>
-      <div style="border-left:2px solid var(--pin);padding-left:10px;line-height:1.7;opacity:.8">${esc(card ? card.parent : "")}</div>
-      <div style="display:flex;gap:8px;margin-top:14px">
-        <button class="btn" style="flex:1">[X] 丢弃</button>
-        <button class="btn btn-pin" style="flex:1">[PIN] 钉住</button>
-      </div>`;
-    el.addEventListener("click", (e) => {
-      if (e.target.closest("button")) el.remove();
-    });
-    document.body.appendChild(el);
-  }
-
-  /* ---------- 钉住 ---------- */
-
-  function pinCard(card, el) {
-    if (!card) return;
-    b.invoke("pin_anchor", {
-      card: { title: card.title, line: card.points[0], at: new Date().toISOString() },
-    }).catch(() => {});
-    if (el && el.animate) {
-      el.animate(
-        [
-          { transform: "scale(0.995)" },
-          { transform: "scale(1.004)" },
-          { transform: "scale(1)" },
-        ],
-        { duration: 260, easing: "cubic-bezier(.2,.7,.2,1)" }
-      );
-    }
-  }
-
-  /* ---------- 顶部与底栏 ---------- */
-
-  $("btn-down").addEventListener("click", async () => {
-    if (!b.hasTauri) return;
-    const w = window.__TAURI__.window.getCurrentWindow();
-    await w.minimize();
+  $("btn-import").addEventListener("click", () => run(async()=>{
+    const paths = await b.invoke("pick_files");
+    await importPaths(paths);
+  }));
+  $("btn-refresh").addEventListener("click", () => run(refresh));
+  $("btn-solid").addEventListener("click", () => run(() => review("remembered")));
+  $("btn-later").addEventListener("click", () => run(() => postpone("tomorrow")));
+  $("btn-close").addEventListener("click", () => b.invoke("hide_main").catch(error));
+  $("btn-down").addEventListener("click", () => {
+    if (b.hasTauri) window.__TAURI__.window.getCurrentWindow().minimize().catch(error);
   });
-
-  $("btn-close").addEventListener("click", async () => {
-    if (!b.hasTauri) {
-      $("shell").style.opacity = "0.2";
-      return;
-    }
-    const w = window.__TAURI__.window.getCurrentWindow();
-    await w.hide();
-  });
-
-  $("subject").addEventListener("click", () => {
-    state.subjectIndex = (state.subjectIndex + 1) % SUBJECTS.length;
-    syncChrome();
-  });
-
-  $("subject").addEventListener("contextmenu", (e) => {
-    e.preventDefault();
-    subjectMenu(e.clientX, e.clientY);
-  });
-
   $("btn-help").addEventListener("click", () => window.toggleKeys());
-  $("btn-help").addEventListener("contextmenu", (e) => {
-    e.preventDefault();
-    window.openMenu(e.clientX, e.clientY, [
-      { label: "键位表", hint: "?", run: () => window.toggleKeys() },
-      {
-        label: "复制当前卡原文",
-        run: () => {
-          const card = state.cards[state.index];
-          if (!card) return;
-          copyText(`${card.title}\n${card.parent}`);
-        },
-      },
-      { sep: true },
-      { label: "今天到这里，收窗", run: () => $("btn-close").click() },
-    ]);
-  });
 
-  function copyText(text) {
-    const done = () => say("已复制");
-    const fail = () => say("这台机器不允许剪贴板写入");
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(text).then(done, fail);
-    } else {
-      fail();
-    }
-  }
-
-  $("btn-solid").addEventListener("click", () => {
-    const card = state.cards[state.index];
-    if (!card) return;
-    card.verdict = { score: 3, notes: card.points };
-    card.state = "review";
-    if (state.index + 1 < state.cards.length) state.index += 1;
-    render();
-  });
-
-  $("btn-later").addEventListener("click", () => {
-    if (!state.cards.length) return;
-    state.cards.splice(state.index, 1);
-    state.index = Math.min(state.index, state.cards.length - 1);
-    render();
-  });
-
-  /* ---------- 空白处右键 ---------- */
-
-  document.addEventListener("contextmenu", (e) => {
-    e.preventDefault();
-    if (e.target.closest(".card, .subject-chip, .icon-btn, .ctx, input, textarea")) return;
-    window.openMenu(e.clientX, e.clientY, [
-      { label: "拖入教材开始导入", run: () => say("把 PDF / Markdown 拖到这里就行") },
-      { label: "键位表", hint: "?", run: () => window.toggleKeys() },
-      { sep: true },
-      {
-        label: "回到今天开头",
-        hint: "Ctrl+N",
-        run: () => stream.scrollTo({ top: 0, behavior: "smooth" }),
-      },
-      { label: "收窗", run: () => $("btn-close").click() },
-    ]);
-  });
-
-  /* ---------- 快捷键 ---------- */
-
-  function isTyping(e) {
-    const t = e.target;
-    return !!t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.isContentEditable);
-  }
-
-  function currentCardEl() {
-    return stream.querySelector(".card.is-focus");
-  }
-
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      if (document.querySelector(".keys-veil.on")) {
-        e.preventDefault();
-        window.toggleKeys();
-        return;
+  function paintSubjects() {
+    $("subject-select").replaceChildren(...state.subjects.map(s => {
+      const option=document.createElement("option"); option.value=s.slug; option.textContent=s.name;
+      option.selected=s.slug===state.subject; return option;
+    }));
+    $("suspended-list").replaceChildren(...state.suspended.map(c => {
+      const item=document.createElement("p"); item.textContent=c.title + " ";
+      if(c.state==="needs_verification") item.append("旧版答案待核对，请从来源重新制卡。");
+      else {
+        const button=document.createElement("button"); button.className="btn data-control"; button.textContent="恢复";
+        button.addEventListener("click",()=>run(async()=>{
+          await write("restore",{card_id:c.id}); await refresh(); paintSubjects();
+        }));
+        item.append(button);
       }
-      if (document.querySelector(".preview-anchor")) return;
-    }
-
-    if (e.ctrlKey && e.key === "Tab") {
-      e.preventDefault();
-      state.subjectIndex = (state.subjectIndex + 1) % SUBJECTS.length;
-      syncChrome();
-      return;
-    }
-    if (e.ctrlKey && (e.key === "n" || e.key === "N")) {
-      e.preventDefault();
-      stream.scrollTo({ top: 0, behavior: "smooth" });
-      $("foot-hint").textContent = "新的一天从这里开始";
-      return;
-    }
-
-    if (isTyping(e)) {
-      // 输入框内只认 Ctrl+Enter：交卷
-      if (e.ctrlKey && e.key === "Enter") {
-        e.preventDefault();
-        act(state.index, "check", currentCardEl());
+      return item;
+    }));
+  }
+  $("subject").addEventListener("click", () => run(async()=>{
+    await subjects(); paintSubjects(); $("subject-dialog").showModal();
+  }));
+  $("subject-select").addEventListener("change", () => run(async()=>{
+    state.subject=$("subject-select").value; state.index=0;
+    await refresh(); paintSubjects();
+  }));
+  $("create-subject-form").addEventListener("submit", e=>{
+    e.preventDefault(); run(async()=>{
+      const created=await b.core({op:"create_subject",name:$("new-subject").value.trim()});
+      state.subject=created.slug; state.index=0; $("new-subject").value="";
+      await subjects(); await refresh(); paintSubjects();
+    });
+  });
+  $("search-form").addEventListener("submit", e=>{
+    e.preventDefault(); run(async()=>{
+      const result=await b.core({op:"search",subject:state.subject,query:$("search-query").value});
+      const list=$("search-results"); list.replaceChildren();
+      for(const hit of result.hits) {
+        const section=document.createElement("section");
+        const heading=document.createElement("h3"); heading.textContent=hit.doc;
+        const body=document.createElement("p"); body.textContent=hit.body;
+        const button=document.createElement("button"); button.className="btn data-control"; button.textContent="从此段钉卡";
+        button.addEventListener("click",()=>run(async()=>{
+          await b.invoke("open_anchor",{seed:{subject:state.subject,selected:hit.body,
+            title:(hit.heading||hit.doc).slice(0,60),parent:hit.body}});
+          $("search-dialog").close();
+        }));
+        section.append(heading,body,button);list.append(section);
       }
-      return;
-    }
-
-    const card = state.cards[state.index];
-    const cardEl = currentCardEl();
-
-    switch (e.key) {
-      case "?":
-        e.preventDefault();
-        window.toggleKeys();
-        break;
-      case "Enter":
-        if (!cardEl || !card) break;
-        e.preventDefault();
-        act(state.index, card.verdict ? "next" : "check", cardEl);
-        break;
-      case " ":
-        if (!cardEl || !card || card.verdict) break;
-        e.preventDefault();
-        act(state.index, "hint", cardEl);
-        break;
-      case "n":
-      case "N":
-        if (!cardEl || !card) break;
-        e.preventDefault();
-        act(state.index, card.verdict ? "next" : "check", cardEl);
-        break;
-      case "s":
-      case "S":
-        if (!cardEl) break;
-        e.preventDefault();
-        $("btn-later").click();
-        say("已挪到明天");
-        break;
-      case "p":
-      case "P":
-        if (!cardEl || !card) break;
-        e.preventDefault();
-        pinCard(card, cardEl);
-        say("已钉住 · 明天先回看");
-        break;
-      case "l":
-      case "L":
-        if (!card) break;
-        e.preventDefault();
-        card.due = "今晚";
-        render();
-        say("已排到今晚 20:00");
-        break;
-      case "c":
-      case "C":
-        if (!cardEl || !card) break;
-        e.preventDefault();
-        copyText(`${card.title}\n${card.parent}`);
-        break;
-    }
+      if(!result.hits.length) list.textContent="没有匹配的原文。";
+      $("search-dialog").showModal();
+    });
   });
-
-  /* ---------- 拖动导入 ---------- */
-
-  const veil = $("veil");
-  let dragDepth = 0;
-  window.addEventListener("dragenter", (e) => {
+  document.addEventListener("keydown", e=>{
+    if(e.defaultPrevented || e.isComposing || document.querySelector("dialog[open],.ctx")) return;
+    const typing=e.target.closest?.("input,textarea,[contenteditable=true]");
+    if(e.ctrlKey && e.key==="Enter" && typing) {e.preventDefault();run(()=>review("answer"));return;}
+    if(typing || e.altKey || e.metaKey || e.ctrlKey || state.busy) return;
+    if(e.target.closest?.("button,select,summary") && (e.key==="Enter" || e.key===" ")) return;
+    if(e.key==="?" || e.key==="F1") {e.preventDefault();window.toggleKeys();return;}
+    if(!active()) return;
+    const action={Enter:active().verdict?"next":"check",n:"next",N:"next"," ":"hint",p:"pin",P:"pin"}[e.key];
+    if(action){e.preventDefault();run(()=>act(action));}
+    else if(e.key.toLowerCase()==="s"){e.preventDefault();run(()=>postpone("tomorrow"));}
+    else if(e.key.toLowerCase()==="l"){e.preventDefault();run(()=>postpone("tonight"));}
+  });
+  window.installLongPress(stream,text=>run(()=>openAnchor(text)),$("press-hint"));
+  window.addEventListener("dragover",e=>e.preventDefault());
+  window.addEventListener("drop",e=>{
     e.preventDefault();
-    dragDepth += 1;
-    veil.classList.add("on");
+    if(!b.hasTauri) error("静态预览不能导入文件。");
+    // Native paths come only from Tauri's DragDrop event, never browser filenames.
   });
-  window.addEventListener("dragover", (e) => e.preventDefault());
-  window.addEventListener("dragleave", (e) => {
-    e.preventDefault();
-    dragDepth = Math.max(0, dragDepth - 1);
-    if (!dragDepth) veil.classList.remove("on");
+  Promise.all([
+    b.on("main:dropped",paths=>run(()=>importPaths(paths))),
+    b.on("data:changed",()=>run(refresh)),
+    b.on("app:error",error),
+  ]).catch(error);
+  function canQuietRefresh() {
+    return state.ready && !state.busy && !active()?.verdict
+      && !document.querySelector("dialog[open],.ctx")
+      && !document.activeElement?.matches("input,textarea,[contenteditable=true]");
+  }
+  let refreshing = false;
+  async function quietRefresh() {
+    if (refreshing || !canQuietRefresh()) return;
+    refreshing = true;
+    try { await refresh(true); } catch (err) { error(err); }
+    finally { refreshing = false; }
+  }
+  window.addEventListener("focus", quietRefresh);
+  setInterval(quietRefresh,60000);
+  run(async()=>{
+    await subjects(); state.ready=true; await refresh();
+    $("foot-hint").textContent="原文可长按钉卡；所有学习操作在保存后反馈。";
   });
-  window.addEventListener("drop", (e) => {
-    e.preventDefault();
-    dragDepth = 0;
-    veil.classList.remove("on");
-    const names = [...(e.dataTransfer?.files || [])].map((f) => f.name);
-    if (names.length) {
-      $("foot-hint").textContent = `已收到 ${names.length} 个文件 · 正在切片`;
-      setTimeout(() => ($("foot-hint").textContent = "切片完成 · 从任意一段长按开钉"), 1400);
-    }
-  });
-
-  b.on("main:dropped", (paths) => {
-    $("foot-hint").textContent = `已收到 ${paths.length} 个文件 · 正在切片`;
-    setTimeout(() => ($("foot-hint").textContent = "切片完成 · 从任意一段长按开钉"), 1400);
-  });
-
-  b.on("main:pinned", (card) => {
-    $("foot-hint").textContent = `已钉住：${card.title}`;
-  });
-
-  /* ---------- 启动 ---------- */
-
-  window.installLongPress(stream, openAnchor, $("press-hint"));
-  render();
 })();

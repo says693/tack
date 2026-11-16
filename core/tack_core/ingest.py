@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import hashlib
 from pathlib import Path
+from semantic_text_splitter import TextSplitter
 
 from . import config
 
@@ -22,7 +24,7 @@ SENT_SPLIT = re.compile(r"(?<=[。！？；.!?;])\s*")
 def read_file(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix in {".txt", ".md"}:
-        return path.read_text("utf-8", errors="replace")
+        return path.read_text("utf-8-sig")
     if suffix == ".pdf":
         try:
             from pypdf import PdfReader  # 延迟导入，没装时给清楚提示
@@ -32,11 +34,11 @@ def read_file(path: Path) -> str:
         pages = [(page.extract_text() or "").strip() for page in reader.pages]
         text = "\n".join(p for p in pages if p)
         if len(text.strip()) < 40 and len(pages) > 0:
-            raise RuntimeError(
-                "这个 PDF 几乎提取不到文字，可能是扫描版；G1 会加视觉兜底，先用 txt 代替。"
+            raise ValueError(
+                "这个 PDF 几乎提取不到文字，可能是扫描版；请先进行 OCR 或使用文本型 PDF。"
             )
         return text
-    raise RuntimeError(f"暂不支持 {suffix}，G0 支持 .txt / .md / .pdf")
+    raise ValueError(f"暂不支持 {suffix}，请使用 .txt / .md / .pdf")
 
 
 def clean(text: str) -> str:
@@ -48,6 +50,8 @@ def clean(text: str) -> str:
 
 def split_chunks(text: str, size: int = 800, overlap: int = 120) -> list[dict]:
     """按标题优先、段落其次切块；块间保留少量重叠，避免句子被腰斩。"""
+    if type(size) is not int or type(overlap) is not int or size <= 0 or not 0 <= overlap < size:
+        raise ValueError("要求 size > 0 且 0 <= overlap < size")
     text = clean(text)
     if not text:
         return []
@@ -67,46 +71,51 @@ def split_chunks(text: str, size: int = 800, overlap: int = 120) -> list[dict]:
     if buf:
         sections.append((heading, "\n".join(buf).strip()))
 
-    # 2) 每节内按句切，再拼到目标尺寸
+    # Mature semantic splitter handles sentence boundaries AND oversized sentences.
     chunks: list[dict] = []
+    splitter = TextSplitter(size, overlap=overlap)
     for heading, body in sections:
-        sentences = [s for s in SENT_SPLIT.split(body) if s.strip()]
-        current = ""
-        for sent in sentences:
-            if len(current) + len(sent) <= size:
-                current += sent
-            else:
-                if current.strip():
-                    chunks.append({"heading": heading, "body": current.strip()})
-                current = (current[-overlap:] if len(current) > overlap else "") + sent
-        if current.strip():
-            chunks.append({"heading": heading, "body": current.strip()})
+        chunks.extend({"heading": heading, "body": chunk} for chunk in splitter.chunks(body))
     return chunks
 
 
-def import_file(conn: sqlite3.Connection, subject: str, path: Path) -> dict:
+def import_file(conn: sqlite3.Connection, subject: str, path: Path, *, commit: bool = True) -> dict:
+    if path.stat().st_size > 50 * 1024 * 1024:
+        raise ValueError("单个文件不能超过 50 MB")
     text = read_file(path)
+    cfg = config.load().learn
     chunks = split_chunks(
         text,
-        size=config.load().learn.chunk_chars,
-        overlap=config.load().learn.chunk_overlap,
+        size=cfg.chunk_chars, overlap=cfg.chunk_overlap,
     )
+    if not chunks:
+        raise ValueError("文件中没有可导入的正文")
+    if len(chunks) > 2000:
+        raise ValueError("文件超过 2000 个文本块，请按章节拆分后导入")
     title = path.stem
-    cur = conn.execute(
-        """
-        INSERT INTO documents (subject, path, title, status)
-        VALUES (?, ?, ?, 'ready')
-        ON CONFLICT(subject, path) DO UPDATE SET title=excluded.title, status='ready'
-        RETURNING id
-        """,
-        (subject, str(path.resolve()), title),
-    )
-    doc_id = int(cur.fetchone()["id"])
-    conn.execute("DELETE FROM chunks WHERE doc_id = ?", (doc_id,))
-    for i, ch in enumerate(chunks):
-        conn.execute(
-            "INSERT INTO chunks (doc_id, ord, heading, body) VALUES (?, ?, ?, ?)",
-            (doc_id, i, ch["heading"], ch["body"]),
-        )
-    conn.commit()
-    return {"doc_id": doc_id, "title": title, "chunks": len(chunks), "chars": len(text)}
+    digest = hashlib.sha256((str((cfg.chunk_chars, cfg.chunk_overlap)) + text).encode()).hexdigest()
+    existing = conn.execute("SELECT * FROM documents WHERE subject=? AND path=?",
+                            (subject, str(path.resolve()))).fetchone()
+    if existing and existing["digest"] == digest:
+        return {"doc_id": existing["id"], "title": title, "chunks": len(chunks),
+                "chars": len(text), "version": existing["current_version"], "unchanged": True}
+    version = existing["current_version"] + 1 if existing else 1
+    try:
+        cur = conn.execute(
+            """INSERT INTO documents(subject,path,title,status,digest,current_version)
+               VALUES(?,?,?,'ready',?,?)
+               ON CONFLICT(subject,path) DO UPDATE SET title=excluded.title,status='ready',
+               digest=excluded.digest,current_version=excluded.current_version RETURNING id""",
+            (subject, str(path.resolve()), title, digest, version))
+        doc_id = int(cur.fetchone()["id"])
+        for i, ch in enumerate(chunks):
+            conn.execute("INSERT INTO chunks(doc_id,ord,heading,body,version) VALUES(?,?,?,?,?)",
+                         (doc_id, i, ch["heading"], ch["body"], version))
+        if commit:
+            conn.commit()
+    except Exception:
+        if commit:
+            conn.rollback()
+        raise
+    return {"doc_id": doc_id, "title": title, "chunks": len(chunks), "chars": len(text),
+            "version": version, "unchanged": False}

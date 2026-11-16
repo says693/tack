@@ -17,10 +17,11 @@ try {
     }
 
     Step 'dependencies'
-    if (-not (Test-Path 'node_modules')) { & npm install --no-fund --no-audit }
+    & npm ci
+    if ($LASTEXITCODE -ne 0) { throw 'dependency install failed' }
 
     Step 'build (release, several minutes)'
-    & npm run build
+    & npm run build -- --bundles nsis -- --locked
     if ($LASTEXITCODE -ne 0) { throw 'build failed' }
 
     Step 'output'
