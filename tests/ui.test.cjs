@@ -110,6 +110,7 @@ test("remembering last card completes the day after backend confirmation",async 
   assert.equal(d.querySelectorAll(".card").length,0);
   assert.equal(f.state.calls.filter(c=>c.op==="review").length,2);
   assert.equal(d.getElementById("btn-solid").disabled,true);
+  assert.doesNotMatch(d.getElementById("foot-hint").textContent,/下一张/);
 });
 test("N moves focus without inventing a review or dropping its draft",async t=>{
   const f=fixture();t.after(()=>f.dom.window.close());const d=await settle(f.dom);

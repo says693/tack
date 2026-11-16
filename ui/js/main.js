@@ -80,6 +80,10 @@
   }
   function render() {
     state.renderedSubject = state.subject;
+    $("foot-hint").textContent = active()?.verdict
+      ? "评分与复习记录已保存；按下一张继续。"
+      : state.cards.length ? "原文可长按钉卡；所有学习操作在保存后反馈。"
+      : state.nextDue ? "当前科目复习已完成，记录已保存。" : "导入材料开始当前科目的学习。";
     stream.innerHTML = state.cards.length ? state.cards.map(cardHTML).join("") :
       `<div class="empty"><p class="empty-title">今天没有待复习的卡</p>
        <p class="empty-hint">${state.nextDue ? `下次复习：${formatDate(state.nextDue)}` : "导入 PDF、Markdown 或文本文件，生成真正保存的学习卡。"}</p></div>`;
@@ -183,10 +187,10 @@
         await write("import", {path});
         count++;
       }
-      $("foot-hint").textContent = `${count} 个文件已导入并保存，重复导入不会重复制卡`;
     } catch (err) {
       throw new Error(`已完成 ${count}/${paths.length} 个文件。当前文件失败：${err?.message || err}`);
     } finally { await refresh(); }
+    $("foot-hint").textContent = `${count} 个文件已导入并保存，重复导入不会重复制卡`;
   }
   $("btn-import").addEventListener("click", () => run(async()=>{
     const paths = await b.invoke("pick_files");
