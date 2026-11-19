@@ -1,5 +1,17 @@
 # Changelog
 
+## 折页 FOLD - 开发中，未发布
+
+- 沿用 `says693/tack` 仓库和旧提交历史，当前实现改为 Tauri / Rust / React，不再使用 Python sidecar。
+- 默认进入连接自己的 AI、输入科目、核对可信资料、生成本地课程的引导式学习流程。
+- 保留原有工作台数据与入口；不将旧版真实模型验收视作新向导验收。
+- CI 改为 Windows 前端构建、单元测试、浏览器回归与 Rust 测试；移除自动发布工作流。
+- 本次仅同步源码、文档与测试，不创建 Release、版本标签或上传安装包。
+
+## 旧版 tack 历史
+
+以下条目描述旧版实现，不代表折页当前功能或验收状态。
+
 ## 0.1.1 — 2026-11-16
 
 - Replaced demo business state with a bundled transactional Python sidecar.

@@ -1,88 +1,59 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "tack",
-  "version": "0.1.1",
-  "identifier": "app.tack.desktop",
+  "productName": "折页",
+  "version": "0.1.0",
+  "identifier": "com.fold.study",
   "build": {
-    "frontendDist": "../ui",
-    "beforeDevCommand": "node scripts/build-core.cjs",
-    "beforeBuildCommand": "node scripts/build-core.cjs"
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
   },
   "app": {
-    "withGlobalTauri": true,
     "windows": [
       {
-        "label": "hud",
-        "title": "tack",
-        "url": "hud.html",
-        "width": 180,
-        "height": 40,
-        "resizable": false,
-        "maximizable": false,
-        "minimizable": false,
-        "closable": false,
-        "decorations": false,
-        "transparent": true,
-        "shadow": false,
-        "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "focus": false,
-        "visible": true
-      },
-      {
         "label": "main",
-        "title": "tack",
-        "url": "main.html",
-        "width": 440,
-        "height": 712,
-        "minWidth": 400,
-        "minHeight": 560,
+        "title": "折页",
+        "width": 720,
+        "height": 700,
+        "minWidth": 360,
+        "minHeight": 240,
         "resizable": true,
-        "decorations": false,
+        "decorations": true,
         "transparent": false,
+        "alwaysOnTop": false,
+        "skipTaskbar": false,
+        "visible": false,
         "shadow": true,
-        "center": true,
-        "visible": true
-      },
-      {
-        "label": "anchor",
-        "title": "tack · 锚点",
-        "url": "anchor.html",
-        "width": 272,
-        "height": 440,
-        "resizable": false,
-        "maximizable": false,
-        "minimizable": false,
-        "decorations": false,
-        "transparent": false,
-        "shadow": true,
-        "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "focus": false,
-        "visible": false
+        "focus": true
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; font-src 'self'; connect-src ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; img-src 'self' asset: data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+      "devCsp": "default-src 'self' http://localhost:1420; img-src 'self' asset: data: blob:; style-src 'self' 'unsafe-inline' http://localhost:1420; font-src 'self' data: http://localhost:1420; script-src 'self' 'unsafe-inline' http://localhost:1420; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 http://localhost:1420; object-src 'none'; base-uri 'none'"
     }
   },
   "bundle": {
     "active": true,
-    "externalBin": ["binaries/tack-core"],
     "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "copyright": "折页 FOLD · 2026",
     "category": "Education",
-    "copyright": "MIT · tack contributors",
-    "shortDescription": "A knowledge pinboard at the edge of your screen.",
-    "longDescription": "tack 把随手选中的几句话钉成卡片，每天温和地提醒你复习，答错时告诉你错在哪。",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.png", "icons/icon.ico"],
+    "shortDescription": "从读到记住的自学助手",
+    "longDescription": "连接自己的 AI，选择想学的科目，从折页提供的可核对资料生成本地课程。课程生成后可以离线学习、作答和复习。",
     "windows": {
+      "webviewInstallMode": {
+        "type": "offlineInstaller"
+      },
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["SimpChinese", "English"],
-        "displayLanguageSelector": false,
-        "installerIcon": "icons/icon.ico",
-        "headerImage": "icons/nsis-header.bmp",
-        "sidebarImage": "icons/nsis-sidebar.bmp"
+        "languages": ["SimpChinese"]
       }
     }
   }

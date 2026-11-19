@@ -1,21 +1,21 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "tack 三窗默认权限：只开放窗口显隐/拖动与事件监听，无网络、无文件系统直通。",
-  "windows": ["hud", "main", "anchor"],
+  "description": "折页主窗口的最小权限集",
+  "windows": ["main"],
   "permissions": [
     "core:default",
-    "core:event:default",
-    "core:window:allow-show",
-    "core:window:allow-hide",
-    "core:window:allow-minimize",
-    "core:window:allow-unminimize",
-    "core:window:allow-set-focus",
     "core:window:allow-start-dragging",
-    "core:window:allow-outer-position",
-    "core:window:allow-scale-factor",
+    "core:window:allow-minimize",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-close",
+    "core:window:allow-set-focus",
+    "core:window:allow-set-size",
     "core:window:allow-set-position",
     "core:window:allow-set-always-on-top",
-    "global-shortcut:default"
+    "core:window:allow-inner-size",
+    "core:window:allow-scale-factor",
+    "dialog:default"
   ]
 }

@@ -1,0 +1,63 @@
+# 测试数据库摘要（不含密钥）
+database: H:/自学软件/.fold-test/fold.db
+
+## settings
+app.onboarded=1
+model.base_url=https://vulcanapi.com/v1
+model.last_test_at=2026-11-15T03:50:31Z
+model.last_test_message=连接成功
+model.last_test_ok=1
+model.model=deepseek-v4.1-flash
+model.provider=deepseek
+model.temperature=0.2
+privacy.cloud_notice_seen=1
+study.daily_new=10
+study.daily_review=50
+study.timezone=Asia/Shanghai
+ui.capsule_metric=due
+ui.theme=paper
+
+## counts
+source=4
+source_revision=6
+chunk=11
+concept=7
+card=7
+card_revision=8
+session=2
+message=2
+daily_assignment=5
+attempt=5
+review=5
+objection=1
+idempotency=5
+
+## cards by status
+active=5
+draft=1
+paused=1
+
+## attempts
+status=confirmed mode=ai verdict=wrong hint=0 demo=0 count=2
+status=confirmed mode=ai verdict=wrong hint=1 demo=0 count=1
+status=confirmed mode=self verdict=- hint=0 demo=0 count=2
+
+## reviews by local_date / grade
+2026-11-15 grade=0 count=2
+2026-11-15 grade=1 count=1
+2026-11-15 grade=2 count=2
+
+## source revisions
+外部片段 · 11-15 11:52 | R1 | 粘贴内容 | 35 chars | 2026-11-15T03:52:30Z
+外部片段 · 11-15 12:13 | R1 | 粘贴内容 | 27 chars | 2026-11-15T04:13:43Z
+白塔镇档案室 | R1 | 版本 1 | 81 chars | 2026-11-15T03:33:51Z
+青石镇档案室 | R1 | 版本 1 | 173 chars | 2026-11-15T03:33:51Z
+青石镇档案室 | R2 | 版本 2 · 规则变更 | 107 chars | 2026-11-15T03:33:51Z
+青石镇档案室 | R3 | 版本 3 · 验收 | 91 chars | 2026-11-15T03:40:32Z
+
+## card evidence revision
+card=active evidence_R-=1
+card=active evidence_R1=1
+card=active evidence_R3=3
+card=draft evidence_R1=1
+card=paused evidence_R1=1

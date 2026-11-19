@@ -1,35 +1,24 @@
-# --- OS junk ---
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# --- Node ---
 node_modules/
-npm-debug.log*
-
-# --- Rust / Tauri ---
-target/
-src-tauri/gen/
-
-# --- Python ---
-core/.venv/
-core/build/
-core/dist/
-src-tauri/binaries/
-__pycache__/
-*.py[cod]
-.pytest_cache/
+dist/
+src-tauri/target/
+.fold-test/
+.fold-review/
 test-results/
-
-# --- tack data: 一科一库，零密钥 ---
-data/
-
-# --- local model config (may contain a base_url; never commit keys anywhere) ---
-core/tack.local.json
-*.local.json
+playwright-report/
+*.log
+src-tauri/gen/schemas/
 .env
 .env.*
-
-# --- editor ---
-.vscode/
-.idea/
+!.env.example
+!.env.*.example
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.pem
+*.key
+*.pfx
+*.p12
+*.exe
+*.msi

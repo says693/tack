@@ -1,18 +1,49 @@
 {
-  "name": "tack",
-  "version": "0.1.1",
+  "name": "fold-study",
   "private": true,
-  "description": "A knowledge pinboard that lives at the edge of your screen.",
-  "license": "MIT",
+  "version": "0.1.0",
+  "description": "折页 FOLD — 从读到记住的自学助手",
+  "type": "module",
   "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
     "tauri": "tauri",
-    "dev": "tauri dev",
-    "build": "tauri build",
-    "test": "node --test tests/*.test.cjs",
-    "build:core": "node scripts/build-core.cjs"
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build --no-bundle",
+    "tauri:installer": "tauri build --bundles nsis",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc --noEmit --pretty false"
+  },
+  "dependencies": {
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/noto-sans-sc": "^5.3.1",
+    "@fontsource-variable/noto-serif-sc": "^5.3.1",
+    "@fontsource/instrument-serif": "^5.3.0",
+    "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-dialog": "^2.8.4",
+    "@tauri-apps/plugin-global-shortcut": "^2.4.1",
+    "dompurify": "^3.4.18",
+    "lucide-react": "^1.73.0",
+    "markdown-it": "^15.0.3",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zustand": "^5.1.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.12.4",
-    "jsdom": "26.1.0"
+    "@playwright/test": "^1.65.1",
+    "@tauri-apps/cli": "^2.12.4",
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^6.3.0",
+    "sharp": "^0.35.5",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0"
   }
 }

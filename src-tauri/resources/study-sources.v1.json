@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "topics": [
+    {
+      "id": "optics-reflection",
+      "title": "光的反射：反射定律",
+      "publisher": "NASA Science",
+      "url": "https://science.nasa.gov/universe/glossary/#reflection-law",
+      "license": "Fold 原创事实摘要；链接仅供核对，未收录原文或译文。",
+      "scope": "光的反射",
+      "aliases": [
+        "物理",
+        "初中物理",
+        "physics",
+        "光的反射",
+        "反射定律",
+        "光的反射定律",
+        "light reflection",
+        "reflection of light",
+        "law of reflection"
+      ],
+      "notes": [
+        "光照到物体表面后，可以反射回入射一侧。",
+        "法线在入射点与反射面垂直。",
+        "入射角是入射光线与法线的夹角，反射角是反射光线与法线的夹角。",
+        "反射角等于入射角。",
+        "入射光线、反射光线和法线在同一平面内。",
+        "光线垂直照到反射面时，入射角和反射角都是零，反射光沿原路返回。"
+      ]
+    },
+    {
+      "id": "algebra-linear-equations",
+      "title": "一元一次方程：等式的变形与检验",
+      "publisher": "Siyavula",
+      "url": "https://www.siyavula.com/read/za/mathematics/grade-10/equations-and-inequalities/04-equations-and-inequalities-01",
+      "license": "Fold 原创事实摘要；链接仅供核对，未收录原文或译文。",
+      "scope": "一元一次方程",
+      "aliases": [
+        "数学",
+        "初中数学",
+        "math",
+        "一元一次方程",
+        "解一元一次方程",
+        "linear equation in one variable",
+        "linear equations in one variable"
+      ],
+      "notes": [
+        "解一元一次方程，就是找出使等式成立的未知数。",
+        "在等式两边同时加上或减去同一个数，等式仍然成立。",
+        "在等式两边同时乘以或除以同一个非零数，得到的方程与原方程的解相同。",
+        "解一元一次方程时，可以用这些变形把方程化成一边只有未知数，另一边是已知数的形式。",
+        "检验时，把求出的数代入原方程；如果左右两边的值相等，它就是原方程的解。"
+      ]
+    },
+    {
+      "id": "python-control-flow",
+      "title": "Python 控制流：条件分支与循环",
+      "publisher": "Python Software Foundation",
+      "url": "https://docs.python.org/3.14/tutorial/controlflow.html",
+      "license": "Fold 原创事实摘要；链接仅供核对，未收录原文或译文。",
+      "scope": "Python 控制流（if / for / range）",
+      "aliases": [
+        "python",
+        "python 入门",
+        "python入门",
+        "python 控制流",
+        "python控制流",
+        "python control flow",
+        "python 控制流（if / for / range）"
+      ],
+      "notes": [
+        "Python 按顺序检查 if 和 elif 的条件，只执行第一个条件为真的分支。",
+        "当所有条件都为假时，如果有 else 分支，就执行它。",
+        "for 循环从可迭代对象中逐个取出元素，每次把取到的元素赋给循环目标。",
+        "range(stop) 从零开始按步长一产生整数，不包含 stop。",
+        "range(start, stop, step) 可以指定起点和步长，但仍不包含终点。"
+      ]
+    }
+  ]
+}
