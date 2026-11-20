@@ -315,12 +315,20 @@ pub fn map_attempt(conn: &Connection, row: &Row<'_>) -> rusqlite::Result<Attempt
     let revision_id: String = row.get("revision_id")?;
     let concept_id: String = row.get("concept_id")?;
     let hint_used: i64 = row.get("hint_used")?;
+    let first_answer: String = row.get("first_answer")?;
+    let answered_at: Option<String> = row.get("answered_at")?;
+    let mut card = get_card_summary(conn, &card_id).unwrap_or_else(|_| placeholder_card(&card_id));
+    let mut revision = get_revision(conn, &revision_id).unwrap_or_else(|_| placeholder_revision(&revision_id, &card_id));
+    if first_answer.trim().is_empty() && answered_at.is_none() {
+        card.answer_preview.clear();
+        revision.answer.clear();
+    }
     Ok(AttemptView {
         id: row.get("id")?,
         concept_id: concept_id.clone(),
-        card_id: card_id.clone(),
-        revision_id: revision_id.clone(),
-        first_answer: row.get("first_answer")?,
+        card_id,
+        revision_id,
+        first_answer,
         hint_used: hint_used != 0,
         hint_text: row.get("hint_text")?,
         practice_answers: practice,
@@ -332,10 +340,10 @@ pub fn map_attempt(conn: &Connection, row: &Row<'_>) -> rusqlite::Result<Attempt
         status: row.get("status")?,
         is_demo: row.get::<_, i64>("is_demo")? != 0,
         started_at: row.get("started_at")?,
-        answered_at: row.get("answered_at")?,
+        answered_at,
         latency_ms: row.get("latency_ms")?,
-        card: get_card_summary(conn, &card_id).unwrap_or_else(|_| placeholder_card(&card_id)),
-        revision: get_revision(conn, &revision_id).unwrap_or_else(|_| placeholder_revision(&revision_id, &card_id)),
+        card,
+        revision,
         concept: get_concept(conn, &concept_id).unwrap_or_else(|_| placeholder_concept(&concept_id)),
     })
 }
@@ -417,14 +425,17 @@ pub fn queue_stats(conn: &Connection) -> AppResult<QueueStats> {
     let new_limit = db::get_setting_i64(conn, "study.daily_new", 10).clamp(1, 200);
     let due_count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM concept c
-         WHERE c.archived_at IS NULL AND c.reps > 0 AND c.due_on IS NOT NULL AND c.due_on <= ?1
+         WHERE c.archived_at IS NULL
+           AND (c.reps > 0 OR c.lapses > 0 OR c.state IN ('review', 'relearning'))
+           AND c.due_on IS NOT NULL AND c.due_on <= ?1
            AND EXISTS (SELECT 1 FROM card ca WHERE ca.concept_id = c.id AND ca.status = 'active' AND ca.archived_at IS NULL)",
         [&today_str],
         |r| r.get(0),
     )?;
     let new_available: i64 = conn.query_row(
         "SELECT COUNT(*) FROM concept c
-         WHERE c.archived_at IS NULL AND c.reps = 0
+         WHERE c.archived_at IS NULL
+           AND c.reps = 0 AND c.lapses = 0 AND c.state = 'new' AND c.due_on IS NULL
            AND EXISTS (SELECT 1 FROM card ca WHERE ca.concept_id = c.id AND ca.status = 'active' AND ca.archived_at IS NULL)
            AND NOT EXISTS (SELECT 1 FROM daily_assignment d WHERE d.concept_id = c.id AND d.local_date = ?1)",
         [&today_str],
@@ -432,6 +443,11 @@ pub fn queue_stats(conn: &Connection) -> AppResult<QueueStats> {
     )?;
     let review_served_today: i64 = conn.query_row(
         "SELECT COUNT(*) FROM daily_assignment WHERE local_date = ?1 AND kind = 'review'",
+        [&today_str],
+        |r| r.get(0),
+    )?;
+    let open_review_today: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM daily_assignment WHERE local_date = ?1 AND kind = 'review' AND completed_at IS NULL",
         [&today_str],
         |r| r.get(0),
     )?;
@@ -448,14 +464,17 @@ pub fn queue_stats(conn: &Connection) -> AppResult<QueueStats> {
     let blocked_count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM concept c
          WHERE c.archived_at IS NULL
-           AND ((c.reps = 0) OR (c.reps > 0 AND c.due_on IS NOT NULL AND c.due_on <= ?1))
+           AND (
+             (c.reps = 0 AND c.lapses = 0 AND c.state = 'new' AND c.due_on IS NULL)
+             OR ((c.reps > 0 OR c.lapses > 0 OR c.state IN ('review', 'relearning')) AND c.due_on IS NOT NULL AND c.due_on <= ?1)
+           )
            AND NOT EXISTS (SELECT 1 FROM card ca WHERE ca.concept_id = c.id AND ca.status = 'active' AND ca.archived_at IS NULL)",
         [&today_str],
         |r| r.get(0),
     )?;
     let review_remaining = (review_limit - review_served_today).max(0);
     let new_remaining = (new_limit - new_served_today).max(0);
-    let backlog = (due_count - review_served_today - review_remaining).max(0);
+    let backlog = (due_count - open_review_today - review_remaining).max(0);
     let _ = today;
     Ok(QueueStats {
         due_count,
@@ -555,12 +574,12 @@ fn weekday_label(day: Weekday) -> String {
     }
 }
 
-pub fn model_status(conn: &Connection) -> ModelStatus {
-    let configured = LlmConfig::load(conn).is_some();
+pub fn model_status(conn: &Connection, data_dir: &Path) -> ModelStatus {
+    let configured = LlmConfig::load_for_dir(conn, data_dir).is_some();
     let provider = db::get_setting(conn, "model.provider").unwrap_or_else(|| "deepseek".into());
     let model = db::get_setting(conn, "model.model").unwrap_or_default();
     let base_url = db::get_setting(conn, "model.base_url").unwrap_or_default();
-    let has_api_key = !db::get_setting(conn, "model.api_key").unwrap_or_default().trim().is_empty();
+    let has_api_key = crate::guided_credentials::load_unified_key(conn, Some(data_dir)).is_some();
     let last_test_ok = db::get_setting(conn, "model.last_test_ok").map(|v| v == "1");
     ModelStatus {
         configured,
@@ -597,7 +616,7 @@ pub fn bootstrap(conn: &Connection, data_dir: &Path) -> AppResult<Bootstrap> {
         data_dir: data_dir.to_string_lossy().to_string(),
         is_first_run: !onboarded,
         guided_ready: false,
-        model: model_status(conn),
+        model: model_status(conn, data_dir),
         settings: study_settings(conn),
         overview: overview(conn)?,
         sources,

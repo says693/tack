@@ -1,6 +1,16 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowRight, BookOpen, Check, RotateCcw } from 'lucide-react';
+import {
+  ArrowRight,
+  BookOpen,
+  Check,
+  LayoutGrid,
+  Moon,
+  PlusCircle,
+  RotateCcw,
+  Sun,
+} from 'lucide-react';
 
+import { BrandMark } from '@/components/BrandMark';
 import { Spinner } from '@/components/ui';
 import { normalizeError } from '@/lib/bridge';
 import { guidedStudy, type GuidedRun, type GuidedSourceProof } from '@/lib/guided-study';
@@ -15,12 +25,19 @@ type DraftState = 'idle' | 'pending' | 'saving' | 'saved' | 'failed';
 
 export function StudyScreen() {
   const navigate = useApp((state) => state.navigate);
+  const theme = useApp((state) => state.theme);
+  const setTheme = useApp((state) => state.setTheme);
+  const markOnboarded = useApp((state) => state.markOnboarded);
+  const refreshAll = useApp((state) => state.refreshAll);
+
   const [run, setRun] = useState<GuidedRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadVersion, setLoadVersion] = useState(0);
   const [draft, setDraft] = useState('');
   const [draftState, setDraftState] = useState<DraftState>('idle');
   const [busy, setBusy] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [confirmSwitch, setConfirmSwitch] = useState(false);
   const [error, setError] = useState('');
   const [loadError, setLoadError] = useState('');
   const active = useRef(true);
@@ -72,6 +89,7 @@ export function StudyScreen() {
 
   useEffect(() => {
     stageTitle.current?.focus();
+    setConfirmSwitch(false);
   }, [run?.stage, run?.current, loading]);
 
   useEffect(() => {
@@ -110,6 +128,25 @@ export function StudyScreen() {
       window.clearInterval(interval);
     };
   }, [doneLessonId]);
+
+  useEffect(() => {
+    if (run?.stage !== 'compare') return;
+    const compareRun = run;
+    function onKey(event: KeyboardEvent) {
+      if (busy || event.ctrlKey || event.metaKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+      if (event.key === '1' && compareRun.answer !== null) {
+        event.preventDefault();
+        void act(() => guidedStudy.confirmAnswer({ attemptId: compareRun.attemptId, grade: 2 }));
+      } else if (event.key === '2') {
+        event.preventDefault();
+        void act(() => guidedStudy.confirmAnswer({ attemptId: compareRun.attemptId, grade: 0 }));
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [run, busy]);
 
   function saveCurrentDraft() {
     cancelDraftTimer();
@@ -171,16 +208,88 @@ export function StudyScreen() {
     }
   }
 
-  function checkAnswer(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function submitDraftAnswer() {
     const answer = draft.trim();
     if (run?.stage !== 'question' || !answer) return;
     void act(() => guidedStudy.submitAnswer({ attemptId: run.attemptId, answer }), true);
   }
 
+  function checkAnswer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    submitDraftAnswer();
+  }
+
+  async function enterWorkbench() {
+    await markOnboarded();
+    await refreshAll();
+    navigate({ name: 'today' });
+  }
+
+  async function switchTopic() {
+    if (resetting || busy) return;
+    setResetting(true);
+    setError('');
+    try {
+      await guidedStudy.reset();
+      await refreshAll();
+      navigate({ name: 'onboarding' }, { replace: true });
+    } catch (reason) {
+      setError(normalizeError(reason).message);
+    } finally {
+      setResetting(false);
+    }
+  }
+
+  const progressPercent = !run
+    ? 0
+    : run.stage === 'done'
+      ? 100
+      : Math.round(((run.current - (run.stage === 'read' ? 0.65 : run.stage === 'question' ? 0.35 : 0.1)) / Math.max(1, run.total)) * 100);
+
+  const topbar = (
+    <div className="guided-topbar">
+      <div className="guided-brand">
+        <BrandMark size={24} />
+        <span>折页</span>
+        <span className="guided-brand-wordmark">FOLD</span>
+      </div>
+      <div className="guided-progress-track" aria-hidden="true">
+        <div className="guided-progress-fill" style={{ width: `${Math.max(8, progressPercent)}%` }} />
+      </div>
+      <div className="guided-util-actions">
+        <button
+          type="button"
+          className="guided-util-btn"
+          aria-label={theme === 'ink' ? '切换为纸色主题' : '切换为墨色主题'}
+          onClick={() => void setTheme(theme === 'ink' ? 'paper' : 'ink')}
+        >
+          {theme === 'ink' ? <Sun size={13} aria-hidden="true" /> : <Moon size={13} aria-hidden="true" />}
+          {theme === 'ink' ? '纸色' : '墨色'}
+        </button>
+        {run ? (
+          <button
+            type="button"
+            className="guided-util-btn"
+            disabled={busy || resetting}
+            onClick={() => {
+              if (run.stage === 'done') void switchTopic();
+              else setConfirmSwitch((value) => !value);
+            }}
+          >
+            <PlusCircle size={13} aria-hidden="true" /> 换个主题
+          </button>
+        ) : null}
+        <button type="button" className="guided-util-btn" onClick={() => void enterWorkbench()}>
+          <LayoutGrid size={13} aria-hidden="true" /> 完整工作台
+        </button>
+      </div>
+    </div>
+  );
+
   if (loading || loadError || !run) {
     return (
       <main className="guided-flow guided-study">
+        {topbar}
         <div className="guided-layout">
           <section className="guided-step">
             <h1 ref={stageTitle} tabIndex={-1}>{loading ? '打开学习' : loadError ? '未能打开学习进度' : '还没有准备好的课程'}</h1>
@@ -189,14 +298,24 @@ export function StudyScreen() {
             ) : loadError ? (
               <>
                 <p className="guided-error" role="alert">{loadError}</p>
-                <button type="button" className="btn btn-primary" onClick={() => setLoadVersion((value) => value + 1)}>
-                  重新读取
-                </button>
+                <div className="guided-actions">
+                  <button type="button" className="btn btn-primary" onClick={() => setLoadVersion((value) => value + 1)}>
+                    重新读取
+                  </button>
+                  <button type="button" className="btn btn-ghost" onClick={() => void enterWorkbench()}>
+                    进入完整工作台
+                  </button>
+                </div>
               </>
             ) : (
-              <button type="button" className="btn btn-primary" onClick={() => navigate({ name: 'onboarding' }, { replace: true })}>
-                准备一节课 <ArrowRight size={15} aria-hidden="true" />
-              </button>
+              <div className="guided-actions">
+                <button type="button" className="btn btn-primary" onClick={() => navigate({ name: 'onboarding' }, { replace: true })}>
+                  准备一节课 <ArrowRight size={15} aria-hidden="true" />
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={() => void enterWorkbench()}>
+                  进入完整工作台
+                </button>
+              </div>
             )}
           </section>
         </div>
@@ -206,6 +325,7 @@ export function StudyScreen() {
 
   return (
     <main className="guided-flow guided-study">
+      {topbar}
       <div className="guided-layout">
         <header className="guided-study-header">
           <div>
@@ -214,6 +334,41 @@ export function StudyScreen() {
           </div>
           {run.stage !== 'done' ? <span className="guided-count">{run.current} / {run.total}</span> : null}
         </header>
+
+        {run.lesson.overview ? (
+          <div className="guided-overview-card">{run.lesson.overview}</div>
+        ) : null}
+
+        <div className="guided-item-pills" aria-label="本节卡片进度">
+          {Array.from({ length: run.total }, (_, idx) => {
+            const num = idx + 1;
+            const isDone = run.stage === 'done' || num < run.current;
+            const isActive = run.stage !== 'done' && num === run.current;
+            return (
+              <span
+                key={num}
+                className={`guided-item-pill${isDone ? ' done' : ''}${isActive ? ' active' : ''}`}
+              >
+                {isDone ? <Check size={11} aria-hidden="true" /> : num}
+                <span>第 {num} 题</span>
+              </span>
+            );
+          })}
+        </div>
+
+        {confirmSwitch ? (
+          <div className="guided-overview-card" role="region" aria-label="确认切换主题">
+            <p className="guided-lesson-copy">确定放弃当前课节进度并选择新主题吗？</p>
+            <div className="guided-actions" style={{ marginTop: 10 }}>
+              <button type="button" className="btn btn-danger btn-sm" disabled={resetting} onClick={() => void switchTopic()}>
+                {resetting ? <Spinner /> : <PlusCircle size={14} aria-hidden="true" />} 确认换个主题
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmSwitch(false)}>
+                继续学习当前课
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <section className="guided-step" aria-labelledby="guided-stage-title" aria-busy={busy}>
           {run.stage === 'read' ? (
@@ -245,10 +400,18 @@ export function StudyScreen() {
                   maxLength={ANSWER_LIMIT}
                   disabled={busy}
                   value={draft}
+                  aria-describedby="guided-answer-hint"
                   onChange={(event) => changeDraft(event.target.value)}
                   onBlur={saveCurrentDraft}
+                  onKeyDown={(event) => {
+                    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                      event.preventDefault();
+                      submitDraftAnswer();
+                    }
+                  }}
                 />
               </label>
+              <span id="guided-answer-hint" className="guided-muted">按 Ctrl / ⌘ + Enter 可快速提交。</span>
               <div className="guided-draft">
                 <p className={draftState === 'failed' ? 'guided-error' : 'guided-muted'} role={draftState === 'failed' ? 'alert' : 'status'}>
                   {draftState === 'saved' ? '草稿已保存'
@@ -296,6 +459,9 @@ export function StudyScreen() {
                   </>
                 )}
               </div>
+              <p className="guided-muted">
+                {run.answer === null ? '快捷键：按 2 确认下次再练' : '快捷键：按 1 我答对了 · 按 2 我需要再练'}
+              </p>
             </>
           ) : (
             <>
@@ -303,13 +469,24 @@ export function StudyScreen() {
               <p className="guided-ready-title"><Check size={18} aria-hidden="true" /> 已保存 {run.completed} 题</p>
               {run.nextDueLabel ? <p className="guided-muted">下次复习：{run.nextDueLabel}</p> : null}
               <StudyError error={error} />
-              {run.reviewAvailable ? (
-                <div className="guided-actions">
-                  <button className="btn btn-primary" type="button" disabled={busy} onClick={() => void act(() => guidedStudy.beginReview(run.lesson.id))}>
+              <div className="guided-done-actions">
+                {run.reviewAvailable ? (
+                  <button className="btn btn-primary" type="button" disabled={busy || resetting} onClick={() => void act(() => guidedStudy.beginReview(run.lesson.id))}>
                     {busy ? <Spinner /> : <RotateCcw size={15} aria-hidden="true" />} 开始复习
                   </button>
-                </div>
-              ) : null}
+                ) : null}
+                <button
+                  className={run.reviewAvailable ? 'btn btn-subtle' : 'btn btn-primary'}
+                  type="button"
+                  disabled={busy || resetting}
+                  onClick={() => void switchTopic()}
+                >
+                  {resetting ? <Spinner /> : <PlusCircle size={15} aria-hidden="true" />} 学习新主题
+                </button>
+                <button className="btn btn-ghost" type="button" disabled={busy || resetting} onClick={() => void enterWorkbench()}>
+                  <LayoutGrid size={15} aria-hidden="true" /> 进入完整工作台
+                </button>
+              </div>
             </>
           )}
         </section>

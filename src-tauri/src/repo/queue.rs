@@ -32,16 +32,21 @@ fn pick_card(conn: &Connection, concept_id: &str) -> AppResult<Option<(String, S
 fn candidates(conn: &Connection, kind: &str, today: &str, limit: i64) -> AppResult<Vec<Candidate>> {
     let sql = if kind == "review" {
         "SELECT c.id, c.due_on FROM concept c
-         WHERE c.archived_at IS NULL AND c.reps > 0 AND c.due_on IS NOT NULL AND c.due_on <= ?1
+         WHERE c.archived_at IS NULL
+           AND (c.reps > 0 OR c.lapses > 0 OR c.state IN ('review', 'relearning'))
+           AND c.due_on IS NOT NULL AND c.due_on <= ?1
            AND EXISTS (SELECT 1 FROM card ca WHERE ca.concept_id = c.id AND ca.status = 'active' AND ca.archived_at IS NULL)
            AND NOT EXISTS (SELECT 1 FROM daily_assignment d WHERE d.concept_id = c.id AND d.local_date = ?1)
-         ORDER BY c.due_on ASC, c.created_at ASC LIMIT ?2"
+         ORDER BY (SELECT COUNT(*) FROM attempt a WHERE a.concept_id = c.id AND a.local_date = ?1 AND a.status = 'abandoned') ASC,
+                  c.due_on ASC, c.created_at ASC LIMIT ?2"
     } else {
         "SELECT c.id, c.due_on FROM concept c
-         WHERE c.archived_at IS NULL AND c.reps = 0
+         WHERE c.archived_at IS NULL
+           AND c.reps = 0 AND c.lapses = 0 AND c.state = 'new' AND c.due_on IS NULL
            AND EXISTS (SELECT 1 FROM card ca WHERE ca.concept_id = c.id AND ca.status = 'active' AND ca.archived_at IS NULL)
            AND NOT EXISTS (SELECT 1 FROM daily_assignment d WHERE d.concept_id = c.id AND d.local_date = ?1)
-         ORDER BY c.created_at ASC LIMIT ?2"
+         ORDER BY (SELECT COUNT(*) FROM attempt a WHERE a.concept_id = c.id AND a.local_date = ?1 AND a.status = 'abandoned') ASC,
+                  c.created_at ASC LIMIT ?2"
     };
     let mut stmt = conn.prepare(sql)?;
     let rows = stmt.query_map(rusqlite::params![today, limit], |r| {
@@ -229,20 +234,25 @@ pub fn next_task(conn: &Connection) -> AppResult<TaskOutcome> {
 
 pub fn blocked_concepts(conn: &Connection, today: &str) -> AppResult<Vec<BlockedConcept>> {
     let mut stmt = conn.prepare(
-        "SELECT c.id, c.name, c.due_on, c.reps FROM concept c
+        "SELECT c.id, c.name, c.due_on, c.reps, c.lapses, c.state FROM concept c
          WHERE c.archived_at IS NULL
-           AND ((c.reps = 0) OR (c.reps > 0 AND c.due_on IS NOT NULL AND c.due_on <= ?1))
+           AND (
+             (c.reps = 0 AND c.lapses = 0 AND c.state = 'new' AND c.due_on IS NULL)
+             OR ((c.reps > 0 OR c.lapses > 0 OR c.state IN ('review', 'relearning')) AND c.due_on IS NOT NULL AND c.due_on <= ?1)
+           )
            AND NOT EXISTS (SELECT 1 FROM card ca WHERE ca.concept_id = c.id AND ca.status = 'active' AND ca.archived_at IS NULL)
          ORDER BY CASE WHEN c.due_on IS NULL THEN 1 ELSE 0 END, c.due_on ASC, c.created_at ASC
          LIMIT 12",
     )?;
     let rows = stmt.query_map([today], |r| {
         let reps: i64 = r.get(3)?;
+        let lapses: i64 = r.get(4)?;
+        let state: String = r.get(5)?;
         Ok(BlockedConcept {
             concept_id: r.get(0)?,
             name: r.get(1)?,
             due_on: r.get(2)?,
-            reason: if reps == 0 {
+            reason: if reps == 0 && lapses == 0 && state == "new" {
                 "待补充卡片".into()
             } else {
                 "卡片已暂停或来源缺失".into()
@@ -268,7 +278,10 @@ pub fn abandon_attempt(conn: &Connection, attempt_id: &str) -> AppResult<Boolean
     conn.execute_batch("BEGIN IMMEDIATE")?;
     let result = (|| -> AppResult<()> {
         if attempt.first_answer.trim().is_empty() {
-            conn.execute("DELETE FROM attempt WHERE id = ?1", [attempt_id])?;
+            conn.execute(
+                "UPDATE attempt SET status = 'abandoned', assignment_id = NULL WHERE id = ?1",
+                [attempt_id],
+            )?;
             if let Some(id) = assignment_id.as_deref() {
                 conn.execute("DELETE FROM daily_assignment WHERE id = ?1", [id])?;
             }
@@ -308,9 +321,12 @@ pub fn get_task_for_attempt(conn: &Connection, attempt_id: &str) -> AppResult<Op
     }
     let attempt = get_attempt(conn, attempt_id)?;
     let stats = queue_stats(conn)?;
+    let is_new = attempt.concept.reps == 0
+        && attempt.concept.lapses == 0
+        && attempt.concept.state == "new";
     Ok(Some(Task {
         assignment_id: String::new(),
-        kind: if attempt.concept.reps == 0 { "new".into() } else { "review".into() },
+        kind: if is_new { "new".into() } else { "review".into() },
         due_on: attempt.concept.due_on.clone(),
         attempt,
         stats,
@@ -326,8 +342,11 @@ pub fn queue_preview(conn: &Connection) -> AppResult<QueuePreview> {
     {
         let mut stmt = conn.prepare(
             "SELECT c.id FROM concept c
-             WHERE c.archived_at IS NULL AND c.reps > 0 AND c.due_on <= ?1
+             WHERE c.archived_at IS NULL
+               AND (c.reps > 0 OR c.lapses > 0 OR c.state IN ('review', 'relearning'))
+               AND c.due_on IS NOT NULL AND c.due_on <= ?1
                AND EXISTS (SELECT 1 FROM card ca WHERE ca.concept_id = c.id AND ca.status = 'active' AND ca.archived_at IS NULL)
+               AND NOT EXISTS (SELECT 1 FROM daily_assignment d WHERE d.concept_id = c.id AND d.local_date = ?1)
              ORDER BY c.due_on ASC LIMIT 8",
         )?;
         let ids = stmt
@@ -344,12 +363,14 @@ pub fn queue_preview(conn: &Connection) -> AppResult<QueuePreview> {
     {
         let mut stmt = conn.prepare(
             "SELECT c.id FROM concept c
-             WHERE c.archived_at IS NULL AND c.reps = 0
+             WHERE c.archived_at IS NULL
+               AND c.reps = 0 AND c.lapses = 0 AND c.state = 'new' AND c.due_on IS NULL
                AND EXISTS (SELECT 1 FROM card ca WHERE ca.concept_id = c.id AND ca.status = 'active' AND ca.archived_at IS NULL)
+               AND NOT EXISTS (SELECT 1 FROM daily_assignment d WHERE d.concept_id = c.id AND d.local_date = ?1)
              ORDER BY c.created_at ASC LIMIT 8",
         )?;
         let ids = stmt
-            .query_map([], |r| r.get::<_, String>(0))?
+            .query_map([&today], |r| r.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         for id in ids {
             if let Some((card_id, _)) = pick_card(conn, &id)? {
@@ -365,29 +386,6 @@ pub fn queue_preview(conn: &Connection) -> AppResult<QueuePreview> {
         new,
         blocked,
     })
-}
-
-pub fn reset_open_attempt(conn: &Connection, attempt_id: &str) -> AppResult<()> {
-    let attempt = get_attempt(conn, attempt_id)?;
-    if attempt.status == "confirmed" {
-        return Err(AppError::user("already_confirmed", "已确认的复习不能重置。"));
-    }
-    conn.execute(
-        "UPDATE attempt SET status = 'awaiting', first_answer = '', answered_at = NULL,
-            feedback = NULL, verdict = NULL, suggested_grade = NULL, feedback_mode = NULL,
-            ai_error = NULL, hint_used = 0, hint_text = NULL, practice_answers = '[]',
-            latency_ms = NULL, feedback_at = NULL
-         WHERE id = ?1",
-        [attempt_id],
-    )?;
-    Ok(())
-}
-
-pub fn concept_due_label(concept: &ConceptView) -> String {
-    match concept.due_on.as_deref() {
-        Some(due) => due.to_string(),
-        None => "未开始".into(),
-    }
 }
 
 #[cfg(test)]
@@ -604,5 +602,69 @@ mod tests {
 
         let kept = cards::resolve_revision(&conn, &card_id, "keep").expect("keep schedule");
         assert_eq!(kept.summary.status, "active");
+    }
+
+    #[test]
+    fn lapsed_concept_with_zero_reps_is_scheduled_as_review_not_new() {
+        let conn = test_db();
+        let card_id = active_card(&conn);
+        let detail = crate::repo::get_card_detail(&conn, &card_id).expect("card");
+        let (today, _, _) = db::local_today(&conn);
+        let tomorrow = (today + chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
+
+        conn.execute(
+            "UPDATE concept SET state = 'relearning', reps = 0, lapses = 1, interval_days = 1, due_on = ?1 WHERE id = ?2",
+            rusqlite::params![tomorrow, detail.concept.id],
+        )
+        .unwrap();
+
+        let outcome = next_task(&conn).expect("future lapsed card must wait until due_on");
+        assert!(outcome.task.is_none());
+        assert_eq!(outcome.stats.new_available, 0);
+        assert_eq!(outcome.stats.due_count, 0);
+
+        let today_str = today.format("%Y-%m-%d").to_string();
+        conn.execute(
+            "UPDATE concept SET due_on = ?1 WHERE id = ?2",
+            rusqlite::params![today_str, detail.concept.id],
+        )
+        .unwrap();
+
+        let due_outcome = next_task(&conn).expect("due lapsed card serves as review");
+        let task = due_outcome.task.expect("task");
+        assert_eq!(task.kind, "review");
+        assert_eq!(task.stats.due_count, 1);
+        assert_eq!(task.stats.new_available, 0);
+    }
+
+    #[test]
+    fn abandoning_blank_attempt_rotates_to_next_candidate_without_loop() {
+        let conn = test_db();
+        for name in ["概念甲", "概念乙"] {
+            let draft = cards::create_draft(
+                &conn,
+                CardDraftInput {
+                    concept_name: name.into(),
+                    question: format!("{name}的问题？"),
+                    answer: format!("{name}的答案。"),
+                    evidence_chunk_id: None,
+                    evidence_excerpt: String::new(),
+                    exercise_origin: "unspecified".into(),
+                    origin_note: None,
+                    mode: "self".into(),
+                    session_id: None,
+                },
+            )
+            .unwrap();
+            cards::accept_card(&conn, &draft.summary.id).unwrap();
+        }
+
+        let first = next_task(&conn).unwrap().task.unwrap();
+        abandon_attempt(&conn, &first.attempt.id).unwrap();
+        let second = next_task(&conn).unwrap().task.unwrap();
+        assert_ne!(first.attempt.concept_id, second.attempt.concept_id);
+        assert_eq!(second.stats.new_served_today, 1);
     }
 }

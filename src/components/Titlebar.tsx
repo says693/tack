@@ -9,6 +9,10 @@ import type { View } from '@/types';
 
 function crumbFor(view: View, title: string | null): string {
   switch (view.name) {
+    case 'onboarding':
+      return '引导准备';
+    case 'study':
+      return '离线学习';
     case 'today':
       return `今日 · ${formatTodayCN()}`;
     case 'library':
@@ -32,6 +36,7 @@ function crumbFor(view: View, title: string | null): string {
 
 export function Titlebar() {
   const view = useApp((state) => state.view);
+  const bootstrap = useApp((state) => state.bootstrap);
   const sources = useApp((state) => state.sources);
   const sessions = useApp((state) => state.sessions);
   const pinned = useApp((state) => state.pinned);
@@ -80,17 +85,15 @@ export function Titlebar() {
         <span className="titlebar-crumb">{crumbFor(view, title)}</span>
       </div>
       <div className="titlebar-actions">
-        {isTauri ? (
-          <button
-            type="button"
-            className="icon-btn"
-            aria-label="引导学习"
-            title="引导学习"
-            onClick={() => navigate({ name: 'onboarding' })}
-          >
-            <BookOpen size={14} />
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label="引导学习"
+          title="引导学习"
+          onClick={() => navigate(bootstrap?.guidedReady ? { name: 'study' } : { name: 'onboarding' })}
+        >
+          <BookOpen size={14} />
+        </button>
         <button
           type="button"
           className={`icon-btn${pinned ? ' active' : ''}`}

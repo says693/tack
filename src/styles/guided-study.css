@@ -1,25 +1,46 @@
+/* ─────────────────────────────────────────────────────────────
+   折页 FOLD · 引导学习流（纸墨书斋装帧）
+   与工作台共用 --bg / --surface / --paper / --accent 令牌。
+   ───────────────────────────────────────────────────────────── */
+
 .guided-flow {
   height: 100%;
   min-width: 0;
   min-height: 0;
   overflow: auto;
   scrollbar-gutter: stable;
-  padding: 24px 24px 32px;
-  background: var(--bg-raised);
+  padding: 18px 24px 32px;
+  background:
+    radial-gradient(640px 340px at 85% -8%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 68%),
+    radial-gradient(520px 320px at 10% 106%, color-mix(in srgb, var(--jade) 5%, transparent), transparent 68%),
+    var(--bg);
 }
 
 .guided-layout {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 620px;
+  max-width: 640px;
   margin-inline: auto;
-  gap: 22px;
+  gap: 18px;
   min-width: 0;
 }
 
 .guided-wizard .guided-layout {
-  max-width: 540px;
+  max-width: 580px;
+}
+
+/* ── 顶部导航与进度条 ────────────────────────────────────── */
+
+.guided-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
 }
 
 .guided-brand {
@@ -27,7 +48,10 @@
   align-items: center;
   gap: 8px;
   color: var(--text);
-  font: 600 16px var(--font-ui);
+  font-family: var(--font-serif);
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
 }
 
 .guided-brand .brand-mark {
@@ -36,15 +60,71 @@
 }
 
 .guided-brand-wordmark {
-  color: var(--text-2);
-  font: 500 10px var(--font-mono);
+  color: var(--text-3);
+  font: 500 9px/1 var(--font-mono);
+  letter-spacing: 0.22em;
+  transform: translateY(1px);
 }
+
+.guided-progress-track {
+  flex: 1 1 110px;
+  min-width: 72px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.guided-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 360ms var(--ease);
+}
+
+.guided-util-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.guided-util-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 75%, transparent);
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    color 150ms var(--ease),
+    background 150ms var(--ease),
+    border-color 150ms var(--ease);
+}
+
+.guided-util-btn:hover {
+  color: var(--text);
+  background: var(--surface);
+  border-color: var(--line-strong);
+}
+
+.guided-util-btn:disabled {
+  opacity: 0.45;
+}
+
+/* ── 向导四步指示 ────────────────────────────────────────── */
 
 .guided-steps {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
-  padding: 0 0 14px;
+  padding: 0 0 12px;
   margin: 0;
   list-style: none;
   border-bottom: 1px solid var(--line);
@@ -53,21 +133,27 @@
 .guided-steps li {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   min-width: 0;
-  color: var(--text-2);
+  color: var(--text-3);
   font-size: 12px;
+  transition: color 180ms var(--ease);
 }
 
 .guided-step-marker {
   display: grid;
   flex: 0 0 auto;
   place-items: center;
-  width: 20px;
-  height: 20px;
+  width: 21px;
+  height: 21px;
   border: 1px solid var(--line-strong);
   border-radius: 50%;
+  background: var(--bg-sunken);
   font: 500 10px var(--font-mono);
+  transition:
+    color 180ms var(--ease),
+    background 180ms var(--ease),
+    border-color 180ms var(--ease);
 }
 
 .guided-steps [aria-current='step'] {
@@ -79,43 +165,95 @@
   color: var(--accent-ink);
   border-color: var(--accent);
   background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.guided-steps .is-past {
+  color: var(--text-2);
 }
 
 .guided-steps .is-past .guided-step-marker {
   color: var(--jade);
-  border-color: var(--line);
+  border-color: color-mix(in srgb, var(--jade) 38%, transparent);
   background: var(--jade-soft);
 }
 
+/* ── 书页容器与阶段切换 ──────────────────────────────────── */
+
 .guided-step,
+.guided-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 15px;
+  min-width: 0;
+  padding: 24px 24px 22px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background:
+    linear-gradient(155deg, color-mix(in srgb, var(--surface) 95%, transparent), color-mix(in srgb, var(--bg-raised) 94%, transparent));
+  box-shadow:
+    0 14px 36px rgba(0, 0, 0, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  animation: rise 260ms var(--ease) both;
+}
+
+:root[data-theme='paper'] .guided-step,
+:root[data-theme='paper'] .guided-stage {
+  box-shadow:
+    0 10px 28px rgba(47, 38, 25, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.guided-step::before,
+.guided-stage::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 22px;
+  bottom: 22px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+  opacity: 0.72;
+}
+
 .guided-form {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 14px;
+  gap: 15px;
   min-width: 0;
-}
-
-.guided-wizard .guided-step {
-  min-height: 290px;
 }
 
 .guided-step h1,
 .guided-lesson-title {
   color: var(--text);
-  font: 600 26px/1.25 var(--font-ui);
+  font-family: var(--font-serif);
+  font-size: clamp(24px, 4.2vw, 30px);
+  font-weight: 500;
+  line-height: 1.24;
+  letter-spacing: 0.01em;
   overflow-wrap: anywhere;
 }
 
 .guided-step h2 {
   color: var(--text);
-  font: 600 20px/1.3 var(--font-ui);
+  font-family: var(--font-serif);
+  font-size: 21px;
+  font-weight: 500;
+  line-height: 1.3;
   overflow-wrap: anywhere;
 }
 
 .guided-step h3 {
   color: var(--text);
-  font: 600 13px/1.4 var(--font-ui);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .guided-step :is(h1, h2)[tabindex='-1']:focus {
@@ -128,7 +266,7 @@
   min-width: 0;
   margin: 0;
   font-size: 13px;
-  line-height: 1.55;
+  line-height: 1.6;
   overflow-wrap: anywhere;
 }
 
@@ -141,7 +279,7 @@
 .guided-ready-title {
   display: flex;
   align-items: flex-start;
-  gap: 7px;
+  gap: 8px;
 }
 
 .guided-status svg,
@@ -157,12 +295,16 @@
 }
 
 .guided-error {
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 32%, transparent);
+  border-radius: 8px;
+  background: var(--danger-soft);
   color: var(--danger);
 }
 
 .guided-balance {
   display: grid;
-  gap: 7px;
+  gap: 8px;
   justify-items: start;
 }
 
@@ -170,8 +312,10 @@
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 10px 0;
-  border-block: 1px solid var(--line);
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg-sunken);
 }
 
 .guided-provider-icon {
@@ -180,8 +324,8 @@
   width: 34px;
   height: 34px;
   flex: 0 0 auto;
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-radius: 7px;
   background: var(--accent-soft);
   color: var(--accent);
 }
@@ -198,9 +342,54 @@
   overflow-wrap: anywhere;
 }
 
+/* ── 主题快捷芯片 ────────────────────────────────────────── */
+
+.guided-topic-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.guided-topic-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.3;
+  transition:
+    border-color 150ms var(--ease),
+    background 150ms var(--ease),
+    color 150ms var(--ease),
+    transform 100ms var(--ease);
+}
+
+.guided-topic-chip:hover {
+  border-color: color-mix(in srgb, var(--accent) 52%, transparent);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.guided-topic-chip:active {
+  transform: translateY(1px);
+}
+
+.guided-topic-chip.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+/* ── 表单控件与操作栏 ────────────────────────────────────── */
+
 .guided-field {
   display: grid;
-  gap: 6px;
+  gap: 7px;
   min-width: 0;
   font-size: 13px;
   font-weight: 600;
@@ -218,19 +407,29 @@
 }
 
 .guided-field textarea {
-  min-height: 88px;
+  min-height: 92px;
   resize: vertical;
 }
 
-.guided-actions {
+.guided-actions,
+.guided-done-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
 
-.guided-actions .btn {
-  min-height: 37px;
+.guided-done-actions {
+  padding-top: 14px;
+  margin-top: 2px;
+  border-top: 1px solid var(--line);
+}
+
+.guided-actions .btn,
+.guided-done-actions .btn {
+  min-height: 36px;
+  height: auto;
+  padding-block: 6px;
   max-width: 100%;
   font-size: 13px;
   white-space: normal;
@@ -241,23 +440,30 @@
 }
 
 .guided-ready-title {
-  font-size: 16px;
-  line-height: 1.5;
+  font-family: var(--font-serif);
+  font-size: 20px;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
 .guided-topic-summary {
   display: grid;
   gap: 3px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--line);
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  background: var(--bg-sunken);
   overflow-wrap: anywhere;
 }
 
 .guided-topic-summary span,
 .guided-sources legend {
-  color: var(--text-2);
-  font-size: 12px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .guided-sources {
@@ -270,19 +476,19 @@
 .guided-sources legend {
   float: left;
   width: 100%;
-  padding: 0 0 4px;
+  padding: 0 0 6px;
   font-weight: 600;
 }
 
 .guided-source {
-  padding: 10px 0 10px 2px;
+  padding: 11px 4px;
   border-bottom: 1px solid var(--line);
 }
 
 .guided-source-select {
   display: flex;
   align-items: flex-start;
-  gap: 9px;
+  gap: 10px;
   min-width: 0;
   cursor: pointer;
 }
@@ -297,7 +503,7 @@
 
 .guided-source-select span {
   display: grid;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
   font-size: 13px;
   overflow-wrap: anywhere;
@@ -310,22 +516,24 @@
 }
 
 .guided-source .guided-details {
-  margin-left: 25px;
+  margin-left: 26px;
 }
 
 .guided-details {
   min-width: 0;
   color: var(--text-2);
   font-size: 12px;
-  line-height: 1.55;
+  line-height: 1.6;
   overflow-wrap: anywhere;
 }
 
 .guided-details summary {
   width: fit-content;
   max-width: 100%;
-  padding: 4px 0;
-  color: var(--text);
+  padding: 5px 0;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
 }
 
@@ -339,7 +547,7 @@
 }
 
 .guided-details .guided-source-url {
-  color: var(--text-2);
+  color: var(--text-3);
   font: 400 11px/1.5 var(--font-mono);
   overflow-wrap: anywhere;
 }
@@ -347,16 +555,18 @@
 .guided-details pre {
   max-height: 250px;
   overflow: auto;
-  padding: 9px 10px;
+  padding: 10px 12px;
   margin-top: 6px;
-  background: var(--surface);
+  background: var(--bg-sunken);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 7px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--text);
   font: inherit;
 }
+
+/* ── 学习页页眉、课程导览与进度丸 ────────────────────────── */
 
 .guided-study-header {
   display: flex;
@@ -364,12 +574,13 @@
   justify-content: space-between;
   gap: 12px;
   min-width: 0;
-  padding-bottom: 13px;
+  padding-bottom: 12px;
   border-bottom: 1px solid var(--line);
 }
 
 .guided-study-header > div {
   min-width: 0;
+  flex: 1;
 }
 
 .guided-study-header .guided-muted {
@@ -379,54 +590,146 @@
 .guided-count {
   color: var(--text-2);
   flex: 0 0 auto;
-  min-width: 44px;
-  text-align: end;
-  font: 500 12px/1.5 var(--font-mono);
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  text-align: center;
+  font: 500 11.5px/1.4 var(--font-mono);
 }
+
+.guided-overview-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 9px 9px 0;
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.guided-item-pills {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.guided-item-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  color: var(--text-3);
+  font: 500 10.5px/1 var(--font-mono);
+  transition:
+    background 180ms var(--ease),
+    border-color 180ms var(--ease),
+    color 180ms var(--ease);
+}
+
+.guided-item-pill:empty {
+  min-width: 30px;
+  height: 5px;
+  padding: 0;
+  border: 0;
+}
+
+.guided-item-pill.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.guided-item-pill.active:empty {
+  background: var(--accent);
+}
+
+.guided-item-pill.done {
+  border-color: color-mix(in srgb, var(--jade) 42%, transparent);
+  background: var(--jade-soft);
+  color: var(--jade);
+}
+
+.guided-item-pill.done:empty {
+  background: var(--jade);
+}
+
+/* ── 讲解、作答、核对 ────────────────────────────────────── */
 
 .guided-lesson-copy,
 .guided-prompt,
 .guided-compare dd {
   color: var(--text);
-  font-size: 14px;
-  line-height: 1.65;
+  font-size: 14.5px;
+  line-height: 1.72;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 .guided-prompt {
-  font-size: 16px;
+  font-family: var(--font-serif);
+  font-size: 19px;
   font-weight: 500;
+  line-height: 1.55;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 2.5px solid var(--accent);
+  border-radius: 0 9px 9px 0;
+  background: var(--bg-sunken);
 }
 
 .guided-example {
   display: grid;
   gap: 5px;
-  padding: 9px 12px;
-  border-inline-start: 2px solid var(--jade);
-  background: var(--surface);
+  padding: 11px 14px;
+  border: 1px solid color-mix(in srgb, var(--jade) 24%, transparent);
+  border-inline-start: 2.5px solid var(--jade);
+  border-radius: 0 9px 9px 0;
+  background: color-mix(in srgb, var(--jade-soft) 58%, var(--bg-sunken));
 }
 
 .guided-compare {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   margin: 0;
 }
 
 .guided-compare > div {
   min-width: 0;
-  border-top: 1px solid var(--line);
-  padding-top: 8px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg-sunken);
+}
+
+.guided-compare > div:last-child {
+  border-color: color-mix(in srgb, var(--jade) 26%, transparent);
+  border-inline-start: 2.5px solid var(--jade);
+  background: color-mix(in srgb, var(--jade-soft) 50%, var(--bg-sunken));
 }
 
 .guided-compare dt {
-  color: var(--text-2);
-  font-size: 12px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
   font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .guided-compare dd {
-  margin: 3px 0 0;
+  margin: 5px 0 0;
 }
 
 .guided-draft {
@@ -434,20 +737,25 @@
   align-items: center;
   gap: 8px;
   min-height: 24px;
-  margin-top: -8px;
+  margin-top: -6px;
 }
 
 .guided-draft > p {
   font-size: 12px;
 }
 
-@media (max-width: 440px) {
+@media (max-width: 480px) {
   .guided-flow {
-    padding: 16px 16px 24px;
+    padding: 14px 14px 24px;
   }
 
   .guided-layout {
-    gap: 16px;
+    gap: 14px;
+  }
+
+  .guided-step,
+  .guided-stage {
+    padding: 18px 16px;
   }
 
   .guided-step h1,

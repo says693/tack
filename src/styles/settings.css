@@ -1,11 +1,11 @@
 .settings-screen {
-  --settings-canvas: #1a1d1c;
-  --settings-rail: #141716;
-  --settings-control: #222624;
-  --settings-hover: #2b312e;
-  --settings-border: #3b433e;
-  --settings-muted: #aab4ad;
-  --settings-picked: color-mix(in srgb, var(--accent) 13%, var(--settings-rail));
+  --settings-canvas: var(--bg);
+  --settings-rail: var(--bg-raised);
+  --settings-control: var(--surface);
+  --settings-hover: var(--surface-2);
+  --settings-border: var(--line-strong);
+  --settings-muted: var(--text-2);
+  --settings-picked: color-mix(in srgb, var(--accent) 12%, var(--surface));
   --settings-ease: cubic-bezier(.2, .72, .25, 1);
   --settings-press: 90ms;
   --settings-quick: 160ms;
@@ -13,7 +13,7 @@
   --settings-disclosure: 240ms;
 
   display: grid;
-  grid-template-columns: 188px minmax(0, 1fr);
+  grid-template-columns: 196px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   background: var(--settings-canvas);
@@ -21,12 +21,13 @@
 }
 
 [data-theme='paper'] .settings-screen {
-  --settings-canvas: #fafbf8;
-  --settings-rail: #edf0ec;
-  --settings-control: #f4f6f2;
-  --settings-hover: #e6ebe5;
-  --settings-border: #d4dcd3;
-  --settings-muted: #526057;
+  --settings-canvas: var(--bg);
+  --settings-rail: var(--bg-raised);
+  --settings-control: var(--surface);
+  --settings-hover: var(--surface-2);
+  --settings-border: var(--line-strong);
+  --settings-muted: var(--text-2);
+  --settings-picked: color-mix(in srgb, var(--accent) 10%, var(--surface));
 }
 
 .settings-rail {
@@ -48,9 +49,11 @@
 }
 
 .settings-rail-head h1 {
-  font-size: 17px;
-  font-weight: 650;
-  line-height: 1.3;
+  font-family: var(--font-serif);
+  font-size: 21px;
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: 0.01em;
 }
 
 .settings-back, .settings-key-toggle {
@@ -75,7 +78,38 @@
   color: var(--text);
 }
 
-.settings-back-onboarding { order: 1; }
+.settings-back-onboarding {
+  flex-basis: 100%;
+  justify-content: flex-start;
+  padding: 0 6px;
+  margin-bottom: 2px;
+  color: var(--text-2);
+}
+
+.settings-dirty-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--amber) 34%, transparent);
+  border-radius: 999px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+}
+
+.settings-dirty-badge::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
 .settings-compact-preview { display: none; }
 [data-view='settings'] .demo-badge { display: none; }
 
@@ -186,9 +220,11 @@
 }
 
 .settings-panel-head h2 {
-  font-size: 23px;
-  font-weight: 660;
-  line-height: 1.35;
+  font-family: var(--font-serif);
+  font-size: 26px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.01em;
 }
 
 .settings-panel-head p {
@@ -447,11 +483,11 @@
 .settings-theme-option:has(:focus-visible) { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 .settings-theme-preview {
-  --preview-bg: #1a1d1c;
-  --preview-rail: #141716;
-  --preview-line: #3b433e;
-  --preview-muted: #49544d;
-  --preview-title: #aab4ad;
+  --preview-bg: #0b0c0e;
+  --preview-rail: #101216;
+  --preview-line: rgba(238, 232, 220, 0.16);
+  --preview-muted: #5a554c;
+  --preview-title: #eee8dc;
   --preview-accent: #d2644a;
   display: grid;
   grid-template-rows: 18px minmax(0, 1fr);
@@ -463,11 +499,11 @@
 }
 
 .settings-theme-preview[data-preview-theme='paper'] {
-  --preview-bg: #fafbf8;
-  --preview-rail: #edf0ec;
-  --preview-line: #d4dcd3;
-  --preview-muted: #bdc8bc;
-  --preview-title: #526057;
+  --preview-bg: #eee7d9;
+  --preview-rail: #f6f0e4;
+  --preview-line: rgba(36, 33, 28, 0.16);
+  --preview-muted: #c2b8a6;
+  --preview-title: #24211c;
   --preview-accent: #a94833;
 }
 
@@ -528,7 +564,7 @@
   .settings-rail-head { min-height: 34px; padding: 0; }
   .settings-rail-head h1 { font-size: 15px; }
   .settings-compact-preview { display: inline; margin-inline-start: auto; color: var(--settings-muted); font-size: 11px; }
-  .settings-back-onboarding { margin-inline-start: auto; }
+  .settings-back-onboarding { flex-basis: auto; margin-bottom: 0; }
   .settings-tabs { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .settings-tab { grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 3px; padding: 5px 2px; font-size: 12px; }
   .settings-tab svg { width: 15px; height: 15px; }

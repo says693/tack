@@ -89,26 +89,6 @@ fn round2(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
 }
 
-pub fn state_label(state: &str) -> &'static str {
-    match state {
-        "new" => "未开始",
-        "learning" => "初学",
-        "review" => "复习",
-        "relearning" => "重学",
-        _ => "未知",
-    }
-}
-
-pub fn grade_label(grade: i64) -> &'static str {
-    match grade {
-        0 => "没想起",
-        1 => "有提示才想起",
-        2 => "独立想起",
-        3 => "毫不费力",
-        _ => "未知",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

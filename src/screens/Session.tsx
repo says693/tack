@@ -267,7 +267,7 @@ export function SessionScreen({ sessionId }: { sessionId: string }) {
                 <button
                   key={prompt}
                   type="button"
-                  className="btn btn-sm btn-ghost"
+                  className="btn btn-sm btn-subtle"
                   disabled={sending}
                   onClick={async () => {
                     const ok = await send(prompt);

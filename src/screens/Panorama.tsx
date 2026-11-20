@@ -10,7 +10,7 @@ import {
 
 import { Composer } from '@/components/Composer';
 import { MessageBubble } from '@/components/MessageBubble';
-import { Loading, Spinner } from '@/components/ui';
+import { ErrorState, Loading, Spinner } from '@/components/ui';
 import { useSessionThread } from '@/hooks/useSessionThread';
 import { api } from '@/lib/api';
 import { normalizeError } from '@/lib/bridge';
@@ -26,13 +26,15 @@ export function PanoramaScreen({ sessionId }: { sessionId: string }) {
   const toast = useApp((state) => state.toast);
   const setWindowMode = useApp((state) => state.setWindowMode);
   const refreshLibrary = useApp((state) => state.refreshLibrary);
+  const refreshOverview = useApp((state) => state.refreshOverview);
   const thread = useSessionThread(sessionId);
-  const { detail, loading, send, sending, patchSession } = thread;
+  const { detail, loading, error, send, sending, patchSession } = thread;
   const [composer, setComposer] = useState('');
   const [parentDetail, setParentDetail] = useState<SessionDetail | null>(null);
   const [generating, setGenerating] = useState(false);
   const [intentBusy, setIntentBusy] = useState(false);
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const stickRef = useRef(true);
 
   const parentId = detail?.session.parentId ?? null;
 
@@ -57,8 +59,9 @@ export function PanoramaScreen({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     const element = bodyRef.current;
     if (!element || messages.length === 0) return;
+    if (last?.status === 'streaming' && !stickRef.current) return;
     element.scrollTop = element.scrollHeight;
-  }, [messages.length, last?.content]);
+  }, [messages.length, last?.content, last?.status]);
 
   async function setIntent(intent: 'learn' | 'review' | 'unspecified') {
     if (!detail || intentBusy || detail.session.intent === intent) return;
@@ -84,6 +87,7 @@ export function PanoramaScreen({ sessionId }: { sessionId: string }) {
       const result = await useApp
         .getState()
         .withCloud((ack) => api.generateCardDraft(detail.session.id, ack, detail.chunk?.id ?? null));
+      await refreshOverview();
       toast('success', '草稿已生成', '尚未进入队列。');
       navigate({ name: 'card', cardId: result.draft.summary.id });
     } catch (err) {
@@ -128,6 +132,14 @@ export function PanoramaScreen({ sessionId }: { sessionId: string }) {
     return (
       <div className="panorama-screen">
         <Loading label="正在铺开全景…" />
+      </div>
+    );
+  }
+
+  if (error && !detail) {
+    return (
+      <div className="panorama-screen">
+        <ErrorState message={error} onRetry={() => void thread.refresh()} />
       </div>
     );
   }
@@ -252,7 +264,14 @@ export function PanoramaScreen({ sessionId }: { sessionId: string }) {
             <span>分叉会话</span>
             <span>{relativeTime(session.updatedAt)}</span>
           </div>
-          <div className="session-body" ref={bodyRef}>
+          <div
+            className="session-body"
+            ref={bodyRef}
+            onScroll={(event) => {
+              const element = event.currentTarget;
+              stickRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 120;
+            }}
+          >
             {messages.length === 0 ? (
               <div className="session-empty">
                 <Quote size={40} className="faint" style={{ opacity: 0.4 }} />
@@ -279,7 +298,11 @@ export function PanoramaScreen({ sessionId }: { sessionId: string }) {
           <Composer
             value={composer}
             onChange={setComposer}
-            onSend={send}
+            onSend={async (text) => {
+              const ok = await send(text);
+              if (ok) stickRef.current = true;
+              return ok;
+            }}
             onSettings={() => navigate({ name: 'settings', section: 'model' })}
             model={model}
             busy={sending}

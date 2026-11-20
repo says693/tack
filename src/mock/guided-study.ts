@@ -129,6 +129,80 @@ const profiles: PreviewProfile[] = [
       },
     ],
   },
+  {
+    aliases: ['网络', '计算机网络', 'http', 'http 请求', 'http 协议', 'http 请求与响应', '网络请求'],
+    source: {
+      id: 'network-http-basics',
+      title: '计算机网络：HTTP 请求与响应',
+      publisher: 'MDN / IETF RFC 9110',
+      url: 'https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Overview',
+      scope: 'HTTP 请求与响应',
+    },
+    overview: '理解请求方法、状态码与无状态请求响应模型。',
+    items: [
+      {
+        explanation: 'HTTP 每次交互都由客户端发起请求、服务器返回响应，双方本身不保存上一次连接的状态。',
+        example: '浏览器打开网页时，先发出 GET 请求，服务器返回 HTML 后本次请求即告完成。',
+        prompt: '为什么说 HTTP 协议本质上是“无状态”的？',
+        referenceAnswer: '服务器默认不会记住同客户端上一次请求的状态，每次请求都相互独立。',
+        correction: '需要登录态时，通常依赖 Cookie 或 Token 在每次请求里重新携带凭据。',
+        quote: 'HTTP 是无状态协议，服务器默认在两次独立请求之间不保留客户端状态。',
+      },
+      {
+        explanation: '请求方法表明动作语义：GET 用于获取资源，POST 通常用于提交数据或触发新资源创建。',
+        example: '刷新文章列表使用 GET，提交表单创建订单通常使用 POST。',
+        prompt: '只读取页面数据时通常使用哪种 HTTP 方法？',
+        referenceAnswer: 'GET 方法。',
+        correction: 'GET 应保持安全与只读语义，不应用于修改服务器核心状态。',
+        quote: 'GET 请求用于获取指定资源，不应在服务端产生修改状态的副作用。',
+      },
+      {
+        explanation: 'HTTP 响应状态码用三位数字概括结果：2xx 表示成功，4xx 表示客户端请求有误，5xx 表示服务端错误。',
+        example: '返回 404 表示请求的路径不存在，返回 200 表示请求成功并附带响应体。',
+        prompt: '收到 404 状态码和 500 状态码，分别指向哪一侧的问题？',
+        referenceAnswer: '404 属于客户端请求问题（资源未找到），500 属于服务器端处理错误。',
+        correction: '4xx 与 5xx 分别区分请求侧与服务侧责任，排查路径完全不同。',
+        quote: '状态码以 2xx 表示成功处理，4xx 表示客户端请求错误，5xx 表示服务器内部异常。',
+      },
+    ],
+  },
+  {
+    aliases: ['化学', '初中化学', '高中化学', '氧化还原', '氧化还原反应', '电子转移', 'redox'],
+    source: {
+      id: 'chemistry-redox',
+      title: '化学基础：氧化还原与电子转移',
+      publisher: 'IUPAC Gold Book / LibreTexts',
+      url: 'https://chem.libretexts.org/Bookshelves/General_Chemistry',
+      scope: '氧化还原反应',
+    },
+    overview: '从电子得失与化合价升降理解氧化与还原。',
+    items: [
+      {
+        explanation: '氧化还原反应的核心不是“有没有氧气参加”，而是反应前后元素发生了电子转移。',
+        example: '铁与硫酸铜溶液反应时没有氧气参与，但铁原子失去电子、铜离子得到电子，依然属于氧化还原反应。',
+        prompt: '判断一个反应是否属于氧化还原反应的本质依据是什么？',
+        referenceAnswer: '反应过程中是否发生电子转移（表现为元素化合价发生变化）。',
+        correction: '不要局限于“是否与氧气结合”，无氧参与的置换反应同样可以是氧化还原反应。',
+        quote: '氧化还原反应的本质是电子转移，外在通常表现为元素化合价的升降。',
+      },
+      {
+        explanation: '失去电子（或化合价升高）的物质发生氧化反应，自身被称为还原剂。',
+        example: '在 Zn + Cu²⁺ → Zn²⁺ + Cu 中，Zn 失去电子、化合价由 0 升至 +2，作还原剂。',
+        prompt: '物质在反应中失去电子、化合价升高，它发生的是氧化还是还原？它是氧化剂还是还原剂？',
+        referenceAnswer: '发生氧化反应，本身作为还原剂。',
+        correction: '记住“升失氧化还原剂”：化合价升高、失去电子、被氧化、作还原剂。',
+        quote: '失去电子、化合价升高的物质被氧化，在反应中作还原剂。',
+      },
+      {
+        explanation: '氧化反应与还原反应总是同时发生、相互伴随，得失电子总数必然守恒。',
+        example: '铜离子得到 2 个电子被还原的同时，必然有金属原子提供这 2 个电子而被氧化。',
+        prompt: '一个化学反应里可能只发生氧化反应而不发生还原反应吗？为什么？',
+        referenceAnswer: '不可能。因为电子不会凭空产生或消失，有失电子就必定有得电子。',
+        correction: '氧化与还原在同一个反应中总是成对出现且得失电子数相等。',
+        quote: '在同一个氧化还原反应中，氧化与还原必然同时发生，且得失电子总数相等。',
+      },
+    ],
+  },
 ];
 
 const storageKey = 'fold:guided-preview:v1';
@@ -151,10 +225,18 @@ interface Due {
   ease: number;
 }
 
+interface CustomLessonData {
+  title: string;
+  overview: string;
+  source: GuidedSource;
+  items: PreviewItem[];
+}
+
 interface PreviewStudy {
   lesson: GuidedRun['lesson'];
   sourceId: string;
   sourceMaterial?: string;
+  custom?: CustomLessonData;
   rounds: Attempt[][];
   due: (Due | null)[];
 }
@@ -189,10 +271,63 @@ function save(state: State) {
   localStorage.setItem(storageKey, JSON.stringify(state));
 }
 
-function matchingProfile(raw: string) {
+function extractCustomMaterial(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (/^自定义[：:]/.test(trimmed)) {
+    const body = trimmed.replace(/^自定义[：:]/, '').trim();
+    return body || null;
+  }
+  if ([...trimmed].length >= 40) {
+    return trimmed;
+  }
+  return null;
+}
+
+function buildCustomSource(body: string): GuidedSource {
+  const firstLine = body.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? body;
+  const title = [...firstLine].slice(0, 18).join('') + ([...firstLine].length > 18 ? '…' : '');
+  return {
+    id: 'custom-user-source',
+    title: `自定义资料：${title}`,
+    publisher: '用户自定义资料',
+    url: '',
+    license: '用户本地粘贴资料 · 仅在确认后发往所选模型',
+    scope: '自定义学习片段',
+    text: body,
+  };
+}
+
+function buildCustomPreviewData(source: GuidedSource): CustomLessonData {
+  const sentences = source.text
+    .split(/(?<=[。！？.!?\n])/)
+    .map((part) => part.trim())
+    .filter((part) => [...part].length >= 6);
+  const pool = sentences.length >= 3
+    ? sentences.slice(0, 3)
+    : [source.text, source.text, source.text];
+
+  const items: PreviewItem[] = pool.map((quote, idx) => ({
+    explanation: `围绕第 ${idx + 1} 段关键表述：「${quote.slice(0, 60)}${quote.length > 60 ? '…' : ''}」提炼核心概念与适用边界。`,
+    example: `结合这段原文条件，试着用自己的话举一个具体情形来说明「${quote.slice(0, 24)}」。`,
+    prompt: `根据你提供的资料第 ${idx + 1} 点，请复述其中最关键的条件或结论。`,
+    referenceAnswer: quote,
+    correction: '核对时对照原文逐字表述，避免漏掉限定条件。',
+    quote,
+  }));
+
+  return {
+    title: source.title.replace(/^自定义资料：/, ''),
+    overview: '根据你提供的本地资料提炼的 3 个离线回忆要点。',
+    source,
+    items,
+  };
+}
+
+function matchingProfile(raw: string): PreviewProfile | undefined {
   const topic = raw.trim();
-  if (!topic || [...topic].length > 80 || /[\n\r\t]/.test(topic) || unsafeControls.test(topic)) {
-    fail('invalid_topic', '请用 1 到 80 个字填写一个想学的科目。');
+  const isCustom = Boolean(extractCustomMaterial(topic));
+  if (!topic || (!isCustom && ([...topic].length > 80 || /[\n\r\t]/.test(topic))) || unsafeControls.test(topic)) {
+    fail('invalid_topic', '请用 1 到 80 个字填写科目，或粘贴 40 字以上学习资料。');
   }
   const normalized = topic
     .replace(/\s+/g, ' ')
@@ -202,7 +337,14 @@ function matchingProfile(raw: string) {
     .replace(topicPrefix, '')
     .trimStart()
     .replace(/^python\s*[，,]\s*想弄懂循环$/, 'python 控制流');
-  return profiles.find((profile) => profile.aliases.includes(normalized));
+
+  const exact = profiles.find((profile) => profile.aliases.includes(normalized));
+  if (exact) return exact;
+
+  return profiles.find((profile) => {
+    const haystack = [profile.source.title, profile.source.scope, ...profile.aliases].map((item) => item.toLowerCase());
+    return haystack.some((candidate) => candidate.includes(normalized) || normalized.includes(candidate));
+  });
 }
 
 function sourceView(profile: PreviewProfile): GuidedSource {
@@ -213,8 +355,12 @@ function sourceView(profile: PreviewProfile): GuidedSource {
   };
 }
 
-function profileOf(study: PreviewStudy) {
-  return profiles.find((profile) => profile.source.id === study.sourceId) ?? changed();
+function itemsOf(study: PreviewStudy): { items: PreviewItem[]; sourceMeta: GuidedSource } {
+  if (study.custom) {
+    return { items: study.custom.items, sourceMeta: study.custom.source };
+  }
+  const profile = profiles.find((entry) => entry.source.id === study.sourceId) ?? changed();
+  return { items: profile.items, sourceMeta: sourceView(profile) };
 }
 
 function currentRound(study: PreviewStudy) {
@@ -251,7 +397,7 @@ function updateDue(before: Due | null, grade: 0 | 2): Due {
 }
 
 function runView(study: PreviewStudy): GuidedRun {
-  const profile = profileOf(study);
+  const { items, sourceMeta } = itemsOf(study);
   const round = currentRound(study);
   const total = round.length;
   const attempt = activeAttempt(study);
@@ -266,12 +412,12 @@ function runView(study: PreviewStudy): GuidedRun {
       reviewAvailable: Boolean(earliest && earliest <= localDay()),
     };
   }
-  const item = profile.items[attempt.item];
+  const item = items[attempt.item];
   const evidence = () => ({
-    label: `${profile.source.publisher} · ${profile.source.title}`,
+    label: `${sourceMeta.publisher} · ${sourceMeta.title}`,
     excerpt: item.quote,
-    url: profile.source.url,
-    material: study.sourceMaterial ?? sourceView(profile).text,
+    url: sourceMeta.url || undefined,
+    material: study.sourceMaterial ?? sourceMeta.text,
   });
   if (!attempt.opened) {
     return { ...progress, stage: 'read', cardId: attempt.id, explanation: item.explanation, example: item.example, source: evidence() };
@@ -301,25 +447,51 @@ export const guidedMock: GuidedStudyApi = {
     return { balanceAvailable: true };
   },
   async findSources(topic) {
+    const customBody = extractCustomMaterial(topic);
+    if (customBody) {
+      return [buildCustomSource(customBody)];
+    }
     const profile = matchingProfile(topic);
     return profile ? [sourceView(profile)] : [];
   },
   async generate({ topic, sourceIds, cloudAck }) {
     if (cloudAck !== true) fail('cloud_ack_required', '请先同意发送范围。');
+    const state = load();
+    if (!state.modelConfigured) fail('model_not_configured', '请先模拟连接 AI。');
+
+    const customBody = extractCustomMaterial(topic);
+    if (customBody) {
+      const source = buildCustomSource(customBody);
+      if (sourceIds.length !== 1 || sourceIds[0] !== source.id) {
+        fail('invalid_sources', '所选资料与当前专题不匹配，请重新选择。');
+      }
+      const custom = buildCustomPreviewData(source);
+      const study: PreviewStudy = {
+        lesson: {
+          id: `preview-custom-${Date.now()}`,
+          title: custom.title,
+          topic: topic.trim(),
+          overview: custom.overview,
+        },
+        sourceId: source.id,
+        sourceMaterial: source.text,
+        custom,
+        rounds: [],
+        due: custom.items.map(() => null),
+      };
+      addRound(study, custom.items.map((_, index) => index), false);
+      save({ ...state, study });
+      return runView(study);
+    }
+
     const profile = matchingProfile(topic);
     if (!profile) fail('no_sources', '暂未找到能核对的资料。');
     if (sourceIds.length !== 1 || sourceIds[0] !== profile.source.id) {
       fail('invalid_sources', '所选资料与当前专题不匹配，请重新选择。');
     }
-    const state = load();
-    if (!state.modelConfigured) fail('model_not_configured', '请先模拟连接 AI。');
-    if (state.study) {
-      if (state.study.lesson.topic === topic.trim()) return runView(state.study);
-      fail('lesson_already_exists', '已准备好一节课程，请继续当前学习。');
-    }
     const study: PreviewStudy = {
       lesson: {
-        id: `preview-${profile.source.id}`,
+        id: `preview-${profile.source.id}-${Date.now()}`,
         title: profile.source.scope,
         topic: topic.trim(),
         overview: profile.overview,
@@ -332,6 +504,12 @@ export const guidedMock: GuidedStudyApi = {
     addRound(study, profile.items.map((_, index) => index), false);
     save({ ...state, study });
     return runView(study);
+  },
+  async reset() {
+    const state = load();
+    const next: State = { modelConfigured: state.modelConfigured };
+    save(next);
+    return { modelConfigured: next.modelConfigured, run: null };
   },
   async getRun() {
     const { study } = load();

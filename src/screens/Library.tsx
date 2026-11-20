@@ -31,10 +31,12 @@ export function LibraryScreen() {
   const navigate = useApp((state) => state.navigate);
   const refreshLibrary = useApp((state) => state.refreshLibrary);
   const refreshOverview = useApp((state) => state.refreshOverview);
+  const markOnboarded = useApp((state) => state.markOnboarded);
   const toast = useApp((state) => state.toast);
   const [query, setQuery] = useState('');
   const [importOpen, setImportOpen] = useState(false);
   const [replaceSource, setReplaceSource] = useState<SourceSummary | null>(null);
+  const [revisionPickerOpen, setRevisionPickerOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<SourceSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [externalOpen, setExternalOpen] = useState(false);
@@ -64,6 +66,7 @@ export function LibraryScreen() {
   }
 
   function onImported(detail: SourceDetail) {
+    void markOnboarded();
     navigate({ name: 'reader', sourceId: detail.source.id, revisionId: detail.revision.id });
   }
 
@@ -76,7 +79,7 @@ export function LibraryScreen() {
     setExternalBusy(true);
     try {
       const detail = await api.createExternalFragment(externalText, externalNote.trim() || null);
-      await Promise.all([refreshLibrary(), refreshOverview()]);
+      await Promise.all([refreshLibrary(), refreshOverview(), markOnboarded()]);
       setExternalOpen(false);
       setExternalText('');
       setExternalNote('');
@@ -144,9 +147,12 @@ export function LibraryScreen() {
           <button
             type="button"
             className="btn btn-sm btn-subtle"
-            onClick={() => sources[0] && openImport(sources[0])}
+            onClick={() => {
+              if (sources.length === 1) openImport(sources[0]);
+              else if (sources.length > 1) setRevisionPickerOpen(true);
+            }}
             disabled={!sources.length}
-            title="为已有材料保存新修订"
+            title="选择材料并保存新修订"
           >
             <ArrowDownToLine size={13} />
             新修订
@@ -317,6 +323,39 @@ export function LibraryScreen() {
         onClose={() => setImportOpen(false)}
         onImported={onImported}
       />
+
+      <Modal
+        open={revisionPickerOpen}
+        title="为哪份材料保存新修订？"
+        subtitle="选择要更新的材料。保存新修订后，旧卡片仍绑定各自出生时的来源版本。"
+        onClose={() => setRevisionPickerOpen(false)}
+        footer={
+          <button type="button" className="btn btn-ghost" onClick={() => setRevisionPickerOpen(false)}>
+            取消
+          </button>
+        }
+      >
+        <div className="revision-list">
+          {sources.map((source) => (
+            <button
+              key={source.id}
+              type="button"
+              className="revision-item"
+              style={{ width: '100%', border: 0, borderBottom: '1px solid var(--line)', background: 'transparent', textAlign: 'left', color: 'inherit' }}
+              onClick={() => {
+                setRevisionPickerOpen(false);
+                openImport(source);
+              }}
+            >
+              <span className="revision-no">R{source.currentRevisionNo}</span>
+              <span>
+                <span className="revision-question">{source.title}</span>
+                <span className="revision-meta">{source.chunkCount} 个片段 · {sourceKindLabel(source.kind)}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </Modal>
 
       <Modal
         open={externalOpen}

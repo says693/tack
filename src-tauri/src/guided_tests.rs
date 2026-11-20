@@ -189,11 +189,32 @@ fn duplicate_install_never_replaces_course_or_resets_progress() {
     replacement["title"] = json!("Replacement title");
     let parse_replacement = || guided::parse_lesson(&replacement.to_string(), sources).unwrap();
     guided::install(&mut conn, TOPIC, sources, parse_replacement()).unwrap();
-    let error =
-        guided::install(&mut conn, "Another topic", sources, parse_replacement()).unwrap_err();
-    assert_eq!(error.code(), "lesson_exists");
     assert_eq!(run(&conn), snapshot);
     assert_eq!(row_counts(&conn), [1, 1, 3, 1, 3]);
+
+    guided::install(&mut conn, "Another topic", sources, parse_replacement()).unwrap();
+    let switched = run(&conn);
+    assert_eq!(switched["lesson"]["topic"], "Another topic");
+    assert_eq!(switched["lesson"]["title"], "Replacement title");
+    assert_eq!(switched["stage"], "read");
+    assert_eq!(row_counts(&conn), [1, 1, 3, 1, 3]);
+
+    guided::reset(&mut conn).unwrap();
+    assert!(guided::get_run(&conn).unwrap().is_none());
+    assert!(!guided::has_lesson(&conn).unwrap());
+    assert_eq!(row_counts(&conn), [0; 5]);
+}
+
+#[test]
+fn quote_matching_allows_whitespace_and_newline_differences() {
+    let mut src = source();
+    src.text = "第一句   包含换行\n和多个空格。".into();
+    let mut value = lesson_json(&src);
+    value["items"][0]["quote"] = json!("第一句 包含换行 和多个空格。");
+    value["items"][1]["quote"] = json!("第一句 包含换行 和多个空格。");
+    value["items"][2]["quote"] = json!("第一句 包含换行 和多个空格。");
+    let parsed = guided::parse_lesson(&value.to_string(), &[src]);
+    assert!(parsed.is_ok());
 }
 
 struct TempDb(PathBuf);

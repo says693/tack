@@ -66,7 +66,9 @@
         "python 控制流",
         "python控制流",
         "python control flow",
-        "python 控制流（if / for / range）"
+        "python 控制流（if / for / range）",
+        "for循环",
+        "for 循环"
       ],
       "notes": [
         "Python 按顺序检查 if 和 elif 的条件，只执行第一个条件为真的分支。",
@@ -74,6 +76,55 @@
         "for 循环从可迭代对象中逐个取出元素，每次把取到的元素赋给循环目标。",
         "range(stop) 从零开始按步长一产生整数，不包含 stop。",
         "range(start, stop, step) 可以指定起点和步长，但仍不包含终点。"
+      ]
+    },
+    {
+      "id": "network-http-basics",
+      "title": "计算机网络：HTTP 请求与响应",
+      "publisher": "MDN Web Docs",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Overview",
+      "license": "Fold 原创事实摘要；链接仅供核对，未收录原文或译文。",
+      "scope": "HTTP 请求与响应",
+      "aliases": [
+        "网络",
+        "计算机网络",
+        "http",
+        "http 协议",
+        "http协议",
+        "http 请求与响应",
+        "http请求与响应",
+        "http basics"
+      ],
+      "notes": [
+        "HTTP 是客户端与服务端之间基于请求和响应交换数据的应用层协议。",
+        "客户端发起请求时通常会指定请求方法、目标路径、请求头以及可选的请求体。",
+        "GET 方法用于获取指定资源，POST 方法常用于向服务端提交需要处理的数据。",
+        "服务端处理请求后返回包含状态码、响应头和响应体的 HTTP 响应。",
+        "2xx 状态码表示请求成功，4xx 表示客户端请求有误，5xx 表示服务端处理失败。"
+      ]
+    },
+    {
+      "id": "chemistry-redox",
+      "title": "化学基础：氧化还原与电子转移",
+      "publisher": "OpenStax Chemistry",
+      "url": "https://openstax.org/books/chemistry-2e/pages/4-2-classifying-chemical-reactions",
+      "license": "Fold 原创事实摘要；链接仅供核对，未收录原文或译文。",
+      "scope": "氧化还原反应",
+      "aliases": [
+        "化学",
+        "初中化学",
+        "高中化学",
+        "chemistry",
+        "氧化还原",
+        "氧化还原反应",
+        "redox reaction"
+      ],
+      "notes": [
+        "氧化还原反应是一类伴随元素化合价升降或电子转移的化学反应。",
+        "物质失去电子且化合价升高的过程称为氧化，该物质被称为还原剂。",
+        "物质得到电子且化合价降低的过程称为还原，该物质被称为氧化剂。",
+        "在任何完整的氧化还原反应中，失去的电子总数必然等于得到的电子总数。",
+        "反应前后各元素原子的种类与数量保持不变，同时总电荷也必须守恒。"
       ]
     }
   ]

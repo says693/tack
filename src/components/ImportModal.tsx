@@ -210,6 +210,12 @@ export function ImportModal({ open, onClose, replaceSource = null, onImported }:
             setText(event.target.value);
             setFileName(null);
           }}
+          onKeyDown={(event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+              event.preventDefault();
+              void save();
+            }
+          }}
           placeholder="把原文粘贴在这里。折页会保留逐字偏移量，选中的句子以后还能原样定位。"
         />
       </label>

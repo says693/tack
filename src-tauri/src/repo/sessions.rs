@@ -3,7 +3,7 @@ use rusqlite::{Connection, OptionalExtension};
 use crate::db;
 use crate::error::{AppError, AppResult};
 use crate::models::*;
-use crate::repo::{chunks_for_revision, get_chunk, get_concept, get_session_summary, map_message, messages_for_session, session_select};
+use crate::repo::{chunks_for_revision, get_chunk, get_concept, get_session_summary, messages_for_session, session_select};
 
 pub fn create_session(conn: &Connection, input: SessionCreateInput) -> AppResult<SessionDetail> {
     let intent = match input.intent.as_deref().unwrap_or("unspecified") {
@@ -237,14 +237,6 @@ pub fn update_message(conn: &Connection, message_id: &str, content: &str, status
     Ok(())
 }
 
-pub fn update_message_cites(conn: &Connection, message_id: &str, cites: &[String]) -> AppResult<()> {
-    conn.execute(
-        "UPDATE message SET cites = ?1 WHERE id = ?2",
-        rusqlite::params![serde_json::to_string(cites)?, message_id],
-    )?;
-    Ok(())
-}
-
 pub fn recover_streaming(conn: &Connection) -> AppResult<i64> {
     let changed = conn.execute(
         "UPDATE message SET status = 'failed', error = '应用在生成过程中退出，这条回复可能不完整。'
@@ -264,9 +256,6 @@ pub fn recover_streaming(conn: &Connection) -> AppResult<i64> {
 pub struct ChatContext {
     pub messages: Vec<(String, String)>,
     pub system: String,
-    pub chunk: Option<ChunkView>,
-    pub source_title: Option<String>,
-    pub revision_label: Option<String>,
 }
 
 pub fn build_chat_context(conn: &Connection, session: &SessionSummary) -> AppResult<ChatContext> {
@@ -375,18 +364,16 @@ pub fn build_chat_context(conn: &Connection, session: &SessionSummary) -> AppRes
     Ok(ChatContext {
         messages: context,
         system,
-        chunk,
-        source_title,
-        revision_label,
     })
 }
 
+#[cfg(test)]
 pub fn all_messages_for_session(conn: &Connection, session_id: &str) -> AppResult<Vec<MessageView>> {
     let mut stmt = conn.prepare(
         "SELECT id, session_id, ordinal, role, content, status, error, cites, meta, created_at
          FROM message WHERE session_id = ?1 ORDER BY ordinal ASC",
     )?;
-    let rows = stmt.query_map([session_id], map_message)?;
+    let rows = stmt.query_map([session_id], crate::repo::map_message)?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 

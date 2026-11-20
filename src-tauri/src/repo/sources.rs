@@ -340,13 +340,18 @@ pub fn delete_source(conn: &Connection, source_id: &str) -> AppResult<i64> {
     let result = (|| -> AppResult<i64> {
         let paused = conn.execute(
             "UPDATE card SET status = 'paused', paused_reason = '来源已删除，等待重新定位', updated_at = ?1
-             WHERE status = 'active' AND concept_id IN (
-               SELECT co.id FROM concept co JOIN chunk ch ON ch.id = co.chunk_id WHERE ch.source_id = ?2
-               UNION
-               SELECT co.id FROM concept co JOIN card_revision cr ON cr.evidence_chunk_id IS NOT NULL
+             WHERE status = 'active' AND (
+               id IN (
+                 SELECT ca.id FROM card ca
+                 JOIN card_revision cr ON cr.id = ca.current_revision_id
                  JOIN chunk ch ON ch.id = cr.evidence_chunk_id
-                 JOIN card ca ON ca.id = cr.card_id
-                 WHERE ca.concept_id = co.id AND ch.source_id = ?2
+                 WHERE ch.source_id = ?2
+               )
+               OR concept_id IN (
+                 SELECT co.id FROM concept co
+                 JOIN chunk ch ON ch.id = co.chunk_id
+                 WHERE ch.source_id = ?2
+               )
              )",
             rusqlite::params![db::now_utc(), source_id],
         )? as i64;

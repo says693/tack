@@ -27,7 +27,7 @@ export function CloudConsent() {
       }
     >
       <div className="settings-note">
-        目标服务：{model?.provider || '未配置'} · {model?.model || '未选择模型'}
+        目标服务：{model?.configured ? `${model.provider || '自定义'} · ${model.model}` : '尚未配置模型'}
         {model?.baseUrl ? ` · ${model.baseUrl}` : ''}
       </div>
       <div className="privacy-section">

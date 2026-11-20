@@ -518,6 +518,8 @@ function attemptView(attempt: MockAttempt): AttemptView {
     state.cardRevisions.find((r) => r.id === attempt.revisionId) ??
     fail('revision_not_found', '卡片修订不存在。');
   const concept = state.concepts.find((c) => c.id === attempt.conceptId) ?? fail('concept_not_found', '概念不存在。');
+  const answered = Boolean(attempt.firstAnswer.trim() || attempt.answeredAt);
+  const summary = cardSummary(card);
   return {
     id: attempt.id,
     conceptId: attempt.conceptId,
@@ -537,8 +539,8 @@ function attemptView(attempt: MockAttempt): AttemptView {
     startedAt: attempt.startedAt,
     answeredAt: attempt.answeredAt,
     latencyMs: attempt.latencyMs,
-    card: cardSummary(card),
-    revision,
+    card: answered ? summary : { ...summary, answerPreview: '' },
+    revision: answered ? revision : { ...revision, answer: '' },
     concept: conceptView(concept),
   };
 }
@@ -549,17 +551,30 @@ function activeCardFor(conceptId: string): MockCard | undefined {
     .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))[0];
 }
 
+function hasAbandonedToday(conceptId: string, today: string): boolean {
+  return state.attempts.some(
+    (a) => a.conceptId === conceptId && a.localDate === today && a.status === 'abandoned',
+  );
+}
+
+function isRelearningOrReview(concept: MockConcept): boolean {
+  return concept.reps > 0 || concept.lapses > 0 || concept.state !== 'new';
+}
+
 function dueConcepts(today: string): MockConcept[] {
   return state.concepts
     .filter(
       (c) =>
         !c.archivedAt &&
-        c.reps > 0 &&
+        isRelearningOrReview(c) &&
         c.dueOn !== null &&
         c.dueOn <= today &&
         Boolean(activeCardFor(c.id)),
     )
-    .sort((a, b) => (a.dueOn ?? '').localeCompare(b.dueOn ?? ''));
+    .sort((a, b) => {
+      const ab = Number(hasAbandonedToday(a.id, today)) - Number(hasAbandonedToday(b.id, today));
+      return ab !== 0 ? ab : (a.dueOn ?? '').localeCompare(b.dueOn ?? '');
+    });
 }
 
 function newConcepts(today: string): MockConcept[] {
@@ -567,11 +582,14 @@ function newConcepts(today: string): MockConcept[] {
     .filter(
       (c) =>
         !c.archivedAt &&
-        c.reps === 0 &&
+        !isRelearningOrReview(c) &&
         Boolean(activeCardFor(c.id)) &&
         !state.assignments.some((a) => a.conceptId === c.id && a.localDate === today),
     )
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    .sort((a, b) => {
+      const ab = Number(hasAbandonedToday(a.id, today)) - Number(hasAbandonedToday(b.id, today));
+      return ab !== 0 ? ab : a.createdAt.localeCompare(b.createdAt);
+    });
 }
 
 function blockedConcepts(today: string) {
@@ -579,14 +597,14 @@ function blockedConcepts(today: string) {
     .filter(
       (c) =>
         !c.archivedAt &&
-        ((c.reps === 0) || (c.reps > 0 && c.dueOn !== null && c.dueOn <= today)) &&
+        ((!isRelearningOrReview(c)) || (isRelearningOrReview(c) && c.dueOn !== null && c.dueOn <= today)) &&
         !activeCardFor(c.id),
     )
     .slice(0, 12)
     .map((c) => ({
       conceptId: c.id,
       name: c.name,
-      reason: c.reps === 0 ? '待补充卡片' : '卡片已暂停或来源缺失',
+      reason: !isRelearningOrReview(c) ? '待补充卡片' : '卡片已暂停或来源缺失',
       dueOn: c.dueOn,
     }));
 }
@@ -603,6 +621,7 @@ function queueStats(): QueueStats {
   const completed = state.reviews.filter((r) => r.localDate === today).length;
   const blocked = blockedConcepts(today);
   const reviewRemaining = Math.max(0, reviewLimit - reviewServed);
+  const openReviewAssignments = assignments.filter((a) => a.kind === 'review' && !a.completedAt).length;
   return {
     dueCount: due.length,
     newAvailable: newAvailable.length,
@@ -613,7 +632,7 @@ function queueStats(): QueueStats {
     reviewRemaining,
     newRemaining: Math.max(0, newLimit - newServed),
     completedToday: completed,
-    backlog: Math.max(0, due.length - reviewServed - reviewRemaining),
+    backlog: Math.max(0, due.length - openReviewAssignments - reviewRemaining),
     blockedCount: blocked.length,
   };
 }
@@ -1225,6 +1244,7 @@ function confirmReview(args: AnyRecord): ReviewResult {
   }
   if (!attempt.firstAnswer.trim()) fail('answer_required', '还没有首次答案，不能提交复习。');
   if (attempt.status === 'abandoned') fail('attempt_abandoned', '这次尝试已放弃。');
+  if (attempt.status === 'objected') fail('attempt_objected', '当前反馈处于异议状态，请先改为自评或重新批改后再确认。');
   if (attempt.status === 'insufficient') fail('insufficient_evidence', '这次反馈证据不足，不能提交调度。');
   if (attempt.status === 'ai_failed' && attempt.feedbackMode !== 'self') fail('ai_failed', 'AI 反馈失败，尚未产生有效评分。');
   const mode = attempt.feedbackMode ?? (state.cards.find((c) => c.id === attempt.cardId)?.mode ?? 'ai');
@@ -1966,11 +1986,10 @@ export async function mockInvoke<T>(command: string, args: AnyRecord = {}): Prom
     case 'abandon_attempt': {
       const attempt = state.attempts.find((a) => a.id === String(args.attemptId)) ?? fail('attempt_not_found', '作答记录不存在。');
       if (attempt.status === 'confirmed') fail('already_confirmed', '这次复习已经确认，不能放弃。');
+      attempt.status = 'abandoned';
       if (!attempt.firstAnswer.trim()) {
-        state.attempts = state.attempts.filter((a) => a.id !== attempt.id);
+        attempt.assignmentId = null;
         state.assignments = state.assignments.filter((a) => a.attemptId !== attempt.id);
-      } else {
-        attempt.status = 'abandoned';
       }
       save();
       return { ok: true, changed: true } as T;
@@ -1982,13 +2001,15 @@ export async function mockInvoke<T>(command: string, args: AnyRecord = {}): Prom
       if (attempt.firstAnswer.trim()) fail('already_answered', '首次答案已经保存。');
       const answer = String(input.answer ?? '').trim();
       if (!answer) fail('empty_answer', '先写下你的答案，再提交。');
+      const forgot = answer === '【想不起来】' || answer === '[想不起来]';
       attempt.firstAnswer = answer;
       attempt.answeredAt = nowIso();
       attempt.latencyMs = input.latencyMs ? Number(input.latencyMs) : null;
       const card = state.cards.find((c) => c.id === attempt.cardId);
-      if (card?.mode === 'self') {
+      if (card?.mode === 'self' || attempt.feedbackMode === 'self' || forgot) {
         attempt.status = 'awaiting_self';
         attempt.feedbackMode = 'self';
+        if (forgot) attempt.suggestedGrade = 0;
         save();
         return attemptView(attempt) as T;
       }
@@ -2021,11 +2042,11 @@ export async function mockInvoke<T>(command: string, args: AnyRecord = {}): Prom
     }
     case 'switch_to_self': {
       const attempt = state.attempts.find((a) => a.id === String(args.attemptId)) ?? fail('attempt_not_found', '作答记录不存在。');
-      if (attempt.status !== 'ai_failed' && attempt.status !== 'awaiting_self' && attempt.status !== 'objected') {
-        fail('not_switchable', '只有在 AI 失败或明确选择自评时，才能切换。');
+      if (!['awaiting', 'answered', 'feedback', 'ai_failed', 'awaiting_self', 'objected'].includes(attempt.status)) {
+        fail('not_switchable', '当前状态不能切换为自评。');
       }
       attempt.feedbackMode = 'self';
-      attempt.status = 'awaiting_self';
+      attempt.status = attempt.firstAnswer.trim() ? 'awaiting_self' : 'awaiting';
       save();
       return attemptView(attempt) as T;
     }
@@ -2203,6 +2224,18 @@ export async function mockInvoke<T>(command: string, args: AnyRecord = {}): Prom
     case 'reveal_data_dir':
       fail('not_supported', '浏览器预览没有本地数据目录。');
       break;
+    case 'open_deepseek_page': {
+      const page = String(args.page ?? '');
+      const url = page === 'docs'
+        ? 'https://api-docs.deepseek.com/zh-cn/'
+        : page === 'keys'
+          ? 'https://platform.deepseek.com/api_keys'
+          : page === 'topup'
+            ? 'https://platform.deepseek.com/top_up'
+            : null;
+      if (url && typeof window !== 'undefined') window.open(url, '_blank', 'noopener,noreferrer');
+      return undefined as T;
+    }
     case 'set_window_mode':
     case 'hide_window':
     case 'ui_ready':

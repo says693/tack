@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -21,7 +21,7 @@ import {
 import { Modal } from '@/components/Modal';
 import { Loading, ErrorState, Spinner } from '@/components/ui';
 import { api } from '@/lib/api';
-import { normalizeError } from '@/lib/bridge';
+import { isTauri, normalizeError } from '@/lib/bridge';
 import {
   feedbackVerdictLabel,
   formatDuration,
@@ -60,10 +60,17 @@ const VERDICT_CLASS: Record<string, string> = {
 export function ReviewScreen({ attemptId }: { attemptId: string | null }) {
   const navigate = useApp((state) => state.navigate);
   const goBack = useApp((state) => state.goBack);
+  const history = useApp((state) => state.history);
+  const model = useApp((state) => state.model);
   const toast = useApp((state) => state.toast);
   const settings = useApp((state) => state.settings);
   const applyOverview = useApp((state) => state.applyOverview);
   const refreshOverview = useApp((state) => state.refreshOverview);
+
+  function leaveReview() {
+    if (history.length > 0) goBack();
+    else navigate({ name: 'today' });
+  }
 
   const [task, setTask] = useState<Task | null>(null);
   const [stats, setStats] = useState<QueueStats | null>(null);
@@ -96,7 +103,9 @@ export function ReviewScreen({ attemptId }: { attemptId: string | null }) {
     if (next.suggestedGrade !== null && next.status === 'feedback') {
       setGrade((current) => current ?? next.suggestedGrade);
     }
-    if (next.status === 'awaiting_self') setGrade(null);
+    if (next.status === 'awaiting_self') {
+      setGrade(next.suggestedGrade ?? null);
+    }
     setHint(next.hintUsed ? next.hintText ?? next.feedback?.hint ?? null : null);
     if (next.status === 'awaiting') {
       setStartedAt(Date.now());
@@ -184,7 +193,7 @@ export function ReviewScreen({ attemptId }: { attemptId: string | null }) {
   const isSelf = attempt?.card.mode === 'self' || attempt?.feedbackMode === 'self';
   const canGrade =
     Boolean(attempt) &&
-    ['feedback', 'awaiting_self', 'objected'].includes(attempt!.status) &&
+    ['feedback', 'awaiting_self'].includes(attempt!.status) &&
     grade !== null;
   const showFeedback = Boolean(
     attempt && ['feedback', 'insufficient', 'objected'].includes(attempt.status),
@@ -194,7 +203,12 @@ export function ReviewScreen({ attemptId }: { attemptId: string | null }) {
         100,
         Math.round(
           (stats.completedToday /
-            Math.max(1, stats.completedToday + stats.dueCount + stats.newAvailable)) *
+            Math.max(
+              1,
+              stats.completedToday +
+                Math.min(stats.dueCount, stats.reviewRemaining) +
+                Math.min(stats.newAvailable, stats.newRemaining),
+            )) *
             100,
         ),
       )
@@ -205,6 +219,10 @@ export function ReviewScreen({ attemptId }: { attemptId: string | null }) {
     if (!answer.trim()) {
       setActionError('先写下你的答案，再提交。');
       answerRef.current?.focus();
+      return;
+    }
+    if (!isSelf && isTauri && !model?.configured) {
+      setActionError('尚未配置模型。请先点击「改为自评」完成本次回忆，或在设置里连接模型。');
       return;
     }
     const cloudSeen = settings?.cloudNoticeSeen ?? false;
@@ -235,6 +253,23 @@ export function ReviewScreen({ attemptId }: { attemptId: string | null }) {
       } else {
         setActionError(normalized.message);
       }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitForgot() {
+    if (!attempt || busy) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      const latency = Math.max(0, Date.now() - startedAt);
+      const next = await api.submitAnswer(attempt.id, '【想不起来】', latency, false);
+      localStorage.removeItem(draftKey(attempt.id));
+      applyAttempt(next);
+      setGrade(0);
+    } catch (err) {
+      setActionError(normalizeError(err).message);
     } finally {
       setBusy(false);
     }
@@ -368,6 +403,26 @@ export function ReviewScreen({ attemptId }: { attemptId: string | null }) {
     }
   }
 
+  useEffect(() => {
+    if (!attempt || !['feedback', 'awaiting_self'].includes(attempt.status) || result) return;
+    function onKey(event: KeyboardEvent) {
+      if (busy || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      const inField = Boolean(target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && grade !== null) {
+        event.preventDefault();
+        void confirm();
+        return;
+      }
+      if (!inField && !event.ctrlKey && !event.metaKey && ['0', '1', '2', '3'].includes(event.key)) {
+        event.preventDefault();
+        setGrade(Number(event.key));
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [attempt?.id, attempt?.status, busy, grade, result]);
+
   if (loading) {
     return (
       <div className="review-screen">
@@ -388,7 +443,7 @@ export function ReviewScreen({ attemptId }: { attemptId: string | null }) {
     return (
       <div className="review-screen">
         <div className="review-top">
-          <button type="button" className="icon-btn" aria-label="关闭" onClick={() => navigate({ name: 'today' })}>
+          <button type="button" className="icon-btn" aria-label="关闭" onClick={leaveReview}>
             <X size={16} />
           </button>
           <div className="review-top-title">已确认</div>
@@ -431,7 +486,7 @@ export function ReviewScreen({ attemptId }: { attemptId: string | null }) {
     return (
       <div className="review-screen">
         <div className="review-top">
-          <button type="button" className="icon-btn" aria-label="关闭" onClick={() => navigate({ name: 'today' })}>
+          <button type="button" className="icon-btn" aria-label="关闭" onClick={leaveReview}>
             <X size={16} />
           </button>
           <div className="review-top-title">复习</div>
@@ -480,7 +535,7 @@ export function ReviewScreen({ attemptId }: { attemptId: string | null }) {
 
   const answered = Boolean(attempt.firstAnswer.trim());
   const feedback = attempt.feedback;
-  const canConfirmStatus = ['feedback', 'awaiting_self', 'objected'].includes(attempt.status);
+  const canConfirmStatus = ['feedback', 'awaiting_self'].includes(attempt.status);
   const insufficient = attempt.status === 'insufficient' || verdict === 'insufficient_evidence';
 
   return (
@@ -542,12 +597,20 @@ export function ReviewScreen({ attemptId }: { attemptId: string | null }) {
               {actionError ? <div className="form-error">{actionError}</div> : null}
               <div className="review-actions">
                 <div className="left">
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={goBack}>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={leaveReview}>
                     暂时离开
                   </button>
                   <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAbandonOpen(true)}>
                     跳过这张
                   </button>
+                  <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void submitForgot()}>
+                    想不起来
+                  </button>
+                  {!isSelf ? (
+                    <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void switchSelf()}>
+                      改为自评
+                    </button>
+                  ) : null}
                 </div>
                 <div className="right">
                   <span className="tiny faint">Ctrl / ⌘ + Enter</span>
@@ -707,7 +770,25 @@ export function ReviewScreen({ attemptId }: { attemptId: string | null }) {
                     <div className="self-answer">{referenceAnswer}</div>
                   </div>
 
-                  {attempt.status !== 'insufficient' ? (
+                  {attempt.status === 'objected' ? (
+                    <div className="ai-error-box" style={{ marginTop: 12 }}>
+                      <div className="ai-error-title">
+                        <Flag size={14} /> 已对这次反馈提出异议
+                      </div>
+                      <div className="ai-error-copy">
+                        提出异议后不能直接沿用旧反馈写入排期。请转为自评重评，或重新请求 AI 批改后再确认。
+                      </div>
+                      <div className="ai-error-actions">
+                        <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={() => void switchSelf()}>
+                          改为自评重评
+                        </button>
+                        <button type="button" className="btn btn-sm btn-subtle" disabled={busy} onClick={() => void retryGrade()}>
+                          {busy ? <Spinner size={12} /> : <RefreshCw size={12} />}
+                          重新请求批改
+                        </button>
+                      </div>
+                    </div>
+                  ) : attempt.status !== 'insufficient' ? (
                     <>
                       <div className="feedback-block">
                         <div className="feedback-block-title">
@@ -726,35 +807,6 @@ export function ReviewScreen({ attemptId }: { attemptId: string | null }) {
                             看提示（会记入本次）
                           </button>
                         )}
-                      </div>
-
-                      <div className="feedback-block">
-                        <div className="feedback-block-title">
-                          <ListChecks size={11} /> 这次由你决定评级
-                        </div>
-                        <div className="grade-grid">
-                          {[0, 1, 2, 3].map((value) => (
-                            <button
-                              key={value}
-                              type="button"
-                              className={`grade-option${grade === value ? ' active' : ''}${
-                                attempt.suggestedGrade === value && value === grade ? ' suggested' : ''
-                              }`}
-                              onClick={() => setGrade(value)}
-                            >
-                              <span className="grade-title">
-                                {value} · {gradeLabel(value)}
-                              </span>
-                              <span className="grade-desc">{gradeHint(value)}</span>
-                            </button>
-                          ))}
-                        </div>
-                        {attempt.suggestedGrade !== null ? (
-                          <p className="field-hint" style={{ marginTop: 7 }}>
-                            模型建议 {attempt.suggestedGrade} · {gradeLabel(attempt.suggestedGrade)}。
-                            这只是建议，确认时写入的是你选中的数字。
-                          </p>
-                        ) : null}
                       </div>
 
                       <div className="practice-box">
@@ -791,29 +843,60 @@ export function ReviewScreen({ attemptId }: { attemptId: string | null }) {
                         ) : null}
                       </div>
 
-                      {actionError ? <div className="form-error">{actionError}</div> : null}
-
-                      <div className="review-confirm-row">
-                        <div className="review-confirm-note">
-                          确认后才会写入下一次到期日。点击两次不会重复排期；同一个提交键只会产生一份结果。
+                      <div className="review-action-dock">
+                        <div className="feedback-block" style={{ marginTop: 0 }}>
+                          <div className="feedback-block-title">
+                            <ListChecks size={11} /> 这次由你决定评级（按键 0–3）
+                          </div>
+                          <div className="grade-grid">
+                            {[0, 1, 2, 3].map((value) => (
+                              <button
+                                key={value}
+                                type="button"
+                                className={`grade-option${grade === value ? ' active' : ''}${
+                                  attempt.suggestedGrade === value ? ' suggested is-suggested' : ''
+                                }`}
+                                onClick={() => setGrade(value)}
+                              >
+                                <span className="grade-title">
+                                  {value} · {gradeLabel(value)}
+                                </span>
+                                <span className="grade-desc">{gradeHint(value)}</span>
+                              </button>
+                            ))}
+                          </div>
+                          {attempt.suggestedGrade !== null ? (
+                            <p className="field-hint" style={{ marginTop: 7 }}>
+                              模型建议 {attempt.suggestedGrade} · {gradeLabel(attempt.suggestedGrade)}。
+                              这只是建议，确认时写入的是你选中的数字。
+                            </p>
+                          ) : null}
                         </div>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => setObjectionOpen(true)}
-                          >
-                            <Flag size={12} /> 对反馈有异议
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-primary"
-                            disabled={!canGrade || busy}
-                            onClick={() => void confirm()}
-                          >
-                            {busy ? <Spinner /> : <Check size={14} />}
-                            确认评级并排期
-                          </button>
+
+                        {actionError ? <div className="form-error">{actionError}</div> : null}
+
+                        <div className="review-confirm-row">
+                          <div className="review-confirm-note">
+                            确认后才会写入下一次到期日。点击两次不会重复排期；同一个提交键只会产生一份结果。
+                          </div>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => setObjectionOpen(true)}
+                            >
+                              <Flag size={12} /> 对反馈有异议
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-primary"
+                              disabled={!canGrade || busy}
+                              onClick={() => void confirm()}
+                            >
+                              {busy ? <Spinner /> : <Check size={14} />}
+                              确认评级并排期
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </>
@@ -841,36 +924,42 @@ export function ReviewScreen({ attemptId }: { attemptId: string | null }) {
                     <Sparkles size={16} /> 对照参考答案，自己评级
                   </div>
                   <div className="self-assess-copy">
-                    这张卡是自评模式，不会调用模型。请先看自己的答案，再展开参考答案。
+                    {attempt.firstAnswer === '【想不起来】'
+                      ? '你标记了「想不起来」，建议选 0 · 忘记，明天再重新提取一次。'
+                      : '这张卡是自评模式，不会调用模型。请先看自己的答案，再展开参考答案。'}
                   </div>
-                  <details style={{ marginTop: 10 }}>
+                  <details open={attempt.firstAnswer === '【想不起来】'} style={{ marginTop: 10 }}>
                     <summary className="link" style={{ cursor: 'pointer', display: 'inline-block' }}>
                       展开参考答案
                     </summary>
                     <div className="self-answer">{referenceAnswer}</div>
                   </details>
-                  <div className="grade-grid">
-                    {[0, 1, 2, 3].map((value) => (
-                      <button
-                        key={value}
-                        type="button"
-                        className={`grade-option${grade === value ? ' active' : ''}`}
-                        onClick={() => setGrade(value)}
-                      >
-                        <span className="grade-title">
-                          {value} · {gradeLabel(value)}
-                        </span>
-                        <span className="grade-desc">{gradeHint(value)}</span>
+                  <div className="review-action-dock" style={{ marginTop: 12 }}>
+                    <div className="grade-grid">
+                      {[0, 1, 2, 3].map((value) => (
+                        <button
+                          key={value}
+                          type="button"
+                          className={`grade-option${grade === value ? ' active' : ''}${
+                            attempt.suggestedGrade === value ? ' suggested is-suggested' : ''
+                          }`}
+                          onClick={() => setGrade(value)}
+                        >
+                          <span className="grade-title">
+                            {value} · {gradeLabel(value)}
+                          </span>
+                          <span className="grade-desc">{gradeHint(value)}</span>
+                        </button>
+                      ))}
+                    </div>
+                    {actionError ? <div className="form-error">{actionError}</div> : null}
+                    <div className="review-confirm-row">
+                      <div className="review-confirm-note">自评也使用同一套调度器。到期日会如实写入。</div>
+                      <button type="button" className="btn btn-primary" disabled={!canGrade || busy} onClick={() => void confirm()}>
+                        {busy ? <Spinner /> : <Check size={14} />}
+                        确认评级并排期
                       </button>
-                    ))}
-                  </div>
-                  {actionError ? <div className="form-error">{actionError}</div> : null}
-                  <div className="review-confirm-row">
-                    <div className="review-confirm-note">自评也使用同一套调度器。到期日会如实写入。</div>
-                    <button type="button" className="btn btn-primary" disabled={!canGrade || busy} onClick={() => void confirm()}>
-                      {busy ? <Spinner /> : <Check size={14} />}
-                      确认评级并排期
-                    </button>
+                    </div>
                   </div>
                 </div>
               ) : null}
@@ -889,11 +978,18 @@ export function ReviewScreen({ attemptId }: { attemptId: string | null }) {
               ) : null}
 
               {!feedback && !isSelf && attempt.status === 'objected' ? (
-                <div className="insight-card">
-                  <Flag size={16} className="amber" />
-                  <div>
-                    <div className="step-title">你已提出异议</div>
-                    <div className="step-copy">异议不会自动改分。请重新核对证据，再决定是否确认自己的评级。</div>
+                <div className="ai-error-box">
+                  <div className="ai-error-title">
+                    <Flag size={14} /> 你已提出异议
+                  </div>
+                  <div className="ai-error-copy">异议不会自动改分。请先转为自评重评，或重新请求 AI 批改后再确认。</div>
+                  <div className="ai-error-actions">
+                    <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={() => void switchSelf()}>
+                      改为自评重评
+                    </button>
+                    <button type="button" className="btn btn-sm btn-subtle" disabled={busy} onClick={() => void retryGrade()}>
+                      重新请求批改
+                    </button>
                   </div>
                 </div>
               ) : null}

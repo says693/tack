@@ -4,14 +4,15 @@ use rusqlite::{Connection, OptionalExtension, types::ValueRef};
 use serde_json::{json, Map, Value};
 
 use crate::db;
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 use crate::models::ExportResult;
 use crate::scheduler;
 use crate::text;
 
 pub fn cards_tsv(conn: &Connection) -> AppResult<(String, i64)> {
     let mut stmt = conn.prepare(
-        "SELECT cr.question, cr.answer, cr.evidence_excerpt, cr.exercise_origin,
+        "SELECT COALESCE(cr.question, ''), COALESCE(cr.answer, ''), COALESCE(cr.evidence_excerpt, ''),
+                COALESCE(cr.exercise_origin, 'unspecified'),
                 ca.status, co.name, COALESCE(src.title, ''), COALESCE(ch.locator, ''),
                 COALESCE(sr.label, '')
          FROM card ca
@@ -216,14 +217,7 @@ pub fn backup_db(conn: &Connection, path: &Path) -> AppResult<ExportResult> {
         std::fs::create_dir_all(parent)?;
     }
     conn.backup(rusqlite::MAIN_DB, path, None)?;
-    let check = Connection::open(path)?;
-    let integrity: String = check.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
-    if integrity != "ok" {
-        return Err(AppError::user(
-            "backup_integrity_failed",
-            format!("备份校验失败：{integrity}"),
-        ));
-    }
+    db::sanitize_backup_db(path)?;
     let bytes = std::fs::metadata(path).map(|m| m.len() as i64).unwrap_or(0);
     Ok(ExportResult {
         path: path.to_string_lossy().to_string(),
@@ -300,5 +294,30 @@ mod tests {
         assert!(!text.contains("sk-secret-value"));
         assert_eq!(value.pointer("/counts/cards").unwrap().as_i64(), Some(1));
         assert_eq!(value.pointer("/counts/sources").unwrap().as_i64(), Some(1));
+    }
+
+    #[test]
+    fn backup_db_strips_sensitive_settings() {
+        let conn = test_conn();
+        seed(&conn);
+        crate::db::set_setting(&conn, "model.api_key", "sk-never-in-backup").unwrap();
+        crate::db::set_setting(&conn, "auth.token", "tok-never-in-backup").unwrap();
+        crate::db::set_setting(&conn, "custom.secret", "sec-never-in-backup").unwrap();
+        let target = std::env::temp_dir().join(format!("{}.db", crate::db::new_id("backup-test")));
+
+        let result = backup_db(&conn, &target).unwrap();
+        assert!(result.bytes > 0);
+        let backup_conn = Connection::open(&target).unwrap();
+        for key in ["model.api_key", "auth.token", "custom.secret"] {
+            assert_eq!(crate::db::get_setting(&backup_conn, key).as_deref(), Some(""));
+        }
+        assert_eq!(
+            crate::db::get_setting(&conn, "model.api_key").as_deref(),
+            Some("sk-never-in-backup")
+        );
+        drop(backup_conn);
+        for ext in ["db", "db-wal", "db-shm"] {
+            let _ = std::fs::remove_file(target.with_extension(ext));
+        }
     }
 }

@@ -57,10 +57,12 @@ function categoryFor(section?: string): Category {
 function SettingsTabs({
   active,
   summaries,
+  dirty,
   onChange,
 }: {
   active: Category;
   summaries: Record<Category, string>;
+  dirty?: Partial<Record<Category, boolean>>;
   onChange: (category: Category) => void;
 }) {
   const [compact, setCompact] = useState(() => window.matchMedia(COMPACT_NAV).matches);
@@ -109,6 +111,7 @@ function SettingsTabs({
         >
           <Icon size={17} aria-hidden />
           <span>{label}</span>
+          {dirty?.[id] ? <span className="settings-dirty-badge" aria-hidden="true">未保存</span> : null}
           <span className="settings-tab-summary" aria-hidden>{summaries[id]}</span>
         </button>
       ))}
@@ -282,7 +285,7 @@ export function SettingsScreen({ section }: { section?: string }) {
     const preset = providerFor(baseUrl);
     setProvider(preset?.id ?? (baseUrl ? 'custom' : next.model.provider || 'deepseek'));
     setBaseUrl(baseUrl);
-    setModel(preset?.id === 'deepseek' && !next.model.hasApiKey ? preset.model : next.model.model || '');
+    setModel(next.model.model || preset?.model || '');
     setModelDetailsOpen(preset?.id !== 'deepseek');
     setApiKey('');
     setDailyNew(next.study.dailyNew);
@@ -492,6 +495,13 @@ export function SettingsScreen({ section }: { section?: string }) {
   const canTest = canSave && Boolean(apiKey.trim() || (sameEndpoint && activeModel?.hasApiKey) || preset?.id === 'ollama');
   const busyModel = testing || savingModel;
   const study = settingsStore ?? view?.study;
+  const studyDirty = Boolean(
+    view?.study &&
+      (dailyNew !== view.study.dailyNew ||
+        dailyReview !== view.study.dailyReview ||
+        timezone !== view.study.timezone ||
+        capsuleMetric !== view.study.capsuleMetric),
+  );
   const modelSummary = !isTauri ? '预览' : activeModel?.configured ? '已配置' : '未配置';
   const summaries = {
     study: study ? `${study.dailyNew} / ${study.dailyReview}` : '',
@@ -526,7 +536,7 @@ export function SettingsScreen({ section }: { section?: string }) {
           <h1>设置</h1>
           {!isTauri ? <span className="settings-compact-preview">浏览器预览</span> : null}
         </div>
-        <SettingsTabs active={active} summaries={summaries} onChange={setActive} />
+        <SettingsTabs active={active} summaries={summaries} dirty={{ study: studyDirty }} onChange={setActive} />
         <div className="settings-rail-footer">
           <HardDrive size={14} aria-hidden />
           {isTauri ? '本机配置' : '浏览器预览'}
@@ -655,8 +665,8 @@ export function SettingsScreen({ section }: { section?: string }) {
               <p id="model-api-key-hint" className="settings-hint">
                 {!isTauri ? '预览不接收密钥，请在桌面客户端配置。'
                   : needsNewKey ? '服务地址已变更，需填写新密钥或先清除旧密钥。'
-                  : sameEndpoint && activeModel.hasApiKey ? '已保存密钥。留空保留原值。'
-                  : 'API Key 明文保存在本机，请勿分享数据库备份。'}
+                  : sameEndpoint && activeModel.hasApiKey ? '已保存密钥（与引导学习互通）。留空保留原值。'
+                  : 'API Key 存入系统凭据管理器（受限环境自动加密隔离），不写入数据库备份。'}
               </p>
             </div>
 
@@ -699,7 +709,9 @@ export function SettingsScreen({ section }: { section?: string }) {
           </section>
 
           <section {...panel('study')}>
-            <PanelHeading title="学习节奏" detail="每日预算、到期时区与胶囊显示" />
+            <PanelHeading title="学习节奏" detail="每日预算、到期时区与胶囊显示">
+              {studyDirty ? <span className="settings-dirty-badge">未保存更改</span> : null}
+            </PanelHeading>
             <fieldset className="settings-fieldset settings-list" aria-label="学习设置" disabled={savingStudy}>
               <SettingsRow icon={Layers} label="每日新卡上限" detail="只限制每天领取的新卡">
                 <div role="group" aria-label="每日新卡上限">
@@ -765,7 +777,7 @@ export function SettingsScreen({ section }: { section?: string }) {
                   </button>
                 </div>
               </SettingsRow>
-              <SettingsRow icon={Database} label="数据库备份" detail="备份包含明文 API Key（若已保存），请勿分享。">
+              <SettingsRow icon={Database} label="数据库备份" detail="生成一致性 SQLite 快照，并自动脱敏排除所有密钥字段。">
                 <button type="button" className="btn btn-subtle" onClick={() => void backup()}>
                   <Database size={15} aria-hidden /> 备份数据库
                 </button>

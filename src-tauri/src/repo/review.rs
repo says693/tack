@@ -9,7 +9,7 @@ use crate::models::*;
 use crate::scheduler::{self, ScheduleState};
 use crate::text;
 
-use super::{get_attempt, get_card_summary, get_concept, get_revision, overview};
+use super::{get_attempt, get_concept, overview};
 
 pub struct GradeContext {
     pub attempt: AttemptView,
@@ -33,7 +33,8 @@ pub fn prepare_answer(
             "首次答案已经保存。提示后的练习会附在这条记录里，不会覆盖首次答案。",
         ));
     }
-    if answer.trim().is_empty() {
+    let trimmed = answer.trim();
+    if trimmed.is_empty() {
         return Err(AppError::user("empty_answer", "先写下你的答案，再提交。"));
     }
     if attempt.card.status != "active" {
@@ -42,16 +43,21 @@ pub fn prepare_answer(
             "这张卡当前不在启用状态，不能提交新的复习。",
         ));
     }
-    let status = if attempt.card.mode == "self" {
-        "awaiting_self"
+    let is_forgot = matches!(trimmed, "【想不起来】" | "[想不起来]");
+    let is_self = attempt.card.mode == "self"
+        || attempt.feedback_mode.as_deref() == Some("self")
+        || is_forgot;
+    let status = if is_self { "awaiting_self" } else { "grading" };
+    let mode = if is_self { Some("self") } else { None };
+    let suggested = if is_forgot {
+        Some(0)
     } else {
-        "grading"
+        attempt.suggested_grade
     };
-    let mode = if attempt.card.mode == "self" { Some("self") } else { None };
     conn.execute(
         "UPDATE attempt SET first_answer = ?1, answered_at = ?2, latency_ms = ?3, status = ?4,
-            feedback_mode = ?5, ai_error = NULL WHERE id = ?6",
-        rusqlite::params![answer.trim(), db::now_utc(), latency_ms, status, mode, attempt_id],
+            feedback_mode = ?5, suggested_grade = ?6, ai_error = NULL WHERE id = ?7",
+        rusqlite::params![trimmed, db::now_utc(), latency_ms, status, mode, suggested, attempt_id],
     )?;
     get_attempt(conn, attempt_id)
 }
@@ -103,6 +109,7 @@ pub fn save_ai_feedback(conn: &Connection, attempt_id: &str, feedback: &Feedback
     } else {
         "feedback"
     };
+    let now = db::now_utc();
     conn.execute(
         "UPDATE attempt SET feedback = ?1, verdict = ?2, suggested_grade = ?3, feedback_mode = 'ai',
             status = ?4, feedback_at = ?5, ai_error = NULL WHERE id = ?6",
@@ -111,9 +118,13 @@ pub fn save_ai_feedback(conn: &Connection, attempt_id: &str, feedback: &Feedback
             feedback.verdict,
             suggested,
             status,
-            db::now_utc(),
+            now,
             attempt_id
         ],
+    )?;
+    conn.execute(
+        "UPDATE objection SET status = 'resolved', resolved_at = ?1 WHERE attempt_id = ?2 AND status = 'open'",
+        rusqlite::params![now, attempt_id],
     )?;
     get_attempt(conn, attempt_id)
 }
@@ -128,20 +139,32 @@ pub fn save_ai_failure(conn: &Connection, attempt_id: &str, error: &str) -> AppR
 
 pub fn switch_to_self(conn: &Connection, attempt_id: &str) -> AppResult<AttemptView> {
     let attempt = get_attempt(conn, attempt_id)?;
-    if attempt.status != "ai_failed" && attempt.status != "awaiting_self" {
-        return Err(AppError::user(
-            "not_switchable",
-            "只有在 AI 失败或本来就是自评模式时，才能改用自评。",
-        ));
+    if attempt.status == "confirmed" {
+        return Err(AppError::user("already_confirmed", "这次复习已经确认。"));
     }
-    conn.execute(
-        "UPDATE attempt SET feedback_mode = 'self', status = 'awaiting_self' WHERE id = ?1",
-        [attempt_id],
-    )?;
+    if attempt.status == "abandoned" {
+        return Err(AppError::user("attempt_abandoned", "这次尝试已放弃。"));
+    }
+    let now = db::now_utc();
+    if attempt.first_answer.trim().is_empty() {
+        conn.execute(
+            "UPDATE attempt SET feedback_mode = 'self' WHERE id = ?1",
+            [attempt_id],
+        )?;
+    } else {
+        conn.execute(
+            "UPDATE attempt SET feedback_mode = 'self', status = 'awaiting_self' WHERE id = ?1",
+            [attempt_id],
+        )?;
+        conn.execute(
+            "UPDATE objection SET status = 'resolved', resolved_at = ?1 WHERE attempt_id = ?2 AND status = 'open'",
+            rusqlite::params![now, attempt_id],
+        )?;
+    }
     db::log_event(
         conn,
         "switched_to_self",
-        &json!({"attemptId": attempt_id, "aiError": attempt.ai_error}).to_string(),
+        &json!({"attemptId": attempt_id, "previousStatus": attempt.status, "aiError": attempt.ai_error}).to_string(),
     )?;
     get_attempt(conn, attempt_id)
 }
@@ -232,7 +255,11 @@ pub fn confirm_review(conn: &Connection, input: ConfirmReviewInput) -> AppResult
     if input.idempotency_key.trim().is_empty() {
         return Err(AppError::user("idempotency_required", "缺少提交幂等键。"));
     }
-    let payload_hash = text::sha256_hex(&format!("{}:{}", input.attempt_id, input.grade));
+    let attempt = get_attempt(conn, &input.attempt_id)?;
+    let payload_hash = text::sha256_hex(&format!(
+        "{}:{}:{}",
+        input.attempt_id, attempt.revision_id, input.grade
+    ));
     if let Some(existing) = conn
         .query_row(
             "SELECT payload_hash, response FROM idempotency WHERE key = ?1 AND command = 'confirm_review'",
@@ -244,7 +271,7 @@ pub fn confirm_review(conn: &Connection, input: ConfirmReviewInput) -> AppResult
         if existing.0 != payload_hash {
             return Err(AppError::user(
                 "idempotency_conflict",
-                "同一个提交键对应了不同的答案或评级，已拒绝复用旧结果。",
+                "同一个提交键对应了不同的答案、版本或评级，已拒绝复用旧结果。",
             ));
         }
         let mut value: ReviewResult = serde_json::from_str(&existing.1)?;
@@ -263,12 +290,29 @@ pub fn confirm_review(conn: &Connection, input: ConfirmReviewInput) -> AppResult
         return Ok(result);
     }
 
-    let attempt = get_attempt(conn, &input.attempt_id)?;
     if attempt.first_answer.trim().is_empty() {
         return Err(AppError::user("answer_required", "还没有首次答案，不能提交复习。"));
     }
     if attempt.status == "abandoned" {
         return Err(AppError::user("attempt_abandoned", "这次尝试已放弃。"));
+    }
+    if attempt.status == "objected" {
+        return Err(AppError::user(
+            "attempt_objected",
+            "当前反馈处于异议状态，请先改为自评或重新批改后再确认。",
+        ));
+    }
+    let has_open_objection: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM objection WHERE attempt_id = ?1 AND status = 'open')",
+            [&input.attempt_id],
+            |r| r.get(0),
+        )?;
+    if has_open_objection {
+        return Err(AppError::user(
+            "attempt_objected",
+            "当前反馈处于异议状态，请先改为自评或重新批改后再确认。",
+        ));
     }
     if attempt.status == "insufficient" {
         return Err(AppError::user(
@@ -381,10 +425,6 @@ pub fn confirm_review(conn: &Connection, input: ConfirmReviewInput) -> AppResult
             "UPDATE daily_assignment SET completed_at = ?1 WHERE attempt_id = ?2",
             rusqlite::params![now, input.attempt_id],
         )?;
-        conn.execute(
-            "UPDATE objection SET status = 'resolved', resolved_at = ?1 WHERE attempt_id = ?2 AND status = 'open'",
-            rusqlite::params![now, input.attempt_id],
-        )?;
         let overview_value = overview(conn)?;
         let result = ReviewResult {
             review_id,
@@ -495,17 +535,6 @@ pub fn review_history(conn: &Connection, days: i64) -> AppResult<Vec<DayCount>> 
         });
     }
     Ok(out)
-}
-
-pub fn concept_schedule(conn: &Connection, concept_id: &str) -> AppResult<ConceptView> {
-    get_concept(conn, concept_id)
-}
-
-pub fn attempt_card(conn: &Connection, attempt_id: &str) -> AppResult<(CardSummary, CardRevision)> {
-    let attempt = get_attempt(conn, attempt_id)?;
-    let card = get_card_summary(conn, &attempt.card_id)?;
-    let revision = get_revision(conn, &attempt.revision_id)?;
-    Ok((card, revision))
 }
 
 #[cfg(test)]
@@ -820,5 +849,95 @@ mod tests {
         assert_eq!(count, 1);
         let still = get_attempt(&conn, &first.attempt_id).expect("attempt");
         assert_eq!(still.status, "confirmed");
+    }
+
+    #[test]
+    fn attempt_redacts_reference_answer_until_first_answer_submitted() {
+        let conn = test_db();
+        accepted_card(&conn, "self");
+        let attempt = open_attempt(&conn);
+        assert!(attempt.first_answer.is_empty());
+        assert_eq!(attempt.revision.answer, "");
+        assert_eq!(attempt.card.answer_preview, "");
+
+        let answered = prepare_answer(&conn, &attempt.id, "登记完成后。", None).expect("answer");
+        assert_eq!(answered.revision.answer, "登记完成后。");
+        assert_eq!(answered.card.answer_preview, "登记完成后。");
+    }
+
+    #[test]
+    fn objected_attempt_cannot_confirm_until_switched_or_regraded() {
+        let conn = test_db();
+        accepted_card(&conn, "ai");
+        let attempt = open_attempt(&conn);
+        prepare_answer(&conn, &attempt.id, "登记完成后。", None).expect("answer");
+        let quote = attempt.revision.evidence_excerpt.clone();
+        let chunk_id = attempt.revision.evidence_chunk_id.clone().unwrap();
+        save_ai_feedback(
+            &conn,
+            &attempt.id,
+            &Feedback {
+                verdict: "wrong".into(),
+                hits: vec![],
+                observed_errors: vec!["测试误判".into()],
+                missing_points: vec![],
+                hint: None,
+                evidence: vec![EvidenceRef {
+                    chunk_id,
+                    excerpt: quote,
+                    source_title: None,
+                    label: None,
+                    matched: true,
+                }],
+                note: None,
+                model: Some("test".into()),
+            },
+        )
+        .unwrap();
+
+        raise_objection(&conn, &attempt.id, "原文其实支持我的回答").unwrap();
+        let err = confirm_review(
+            &conn,
+            ConfirmReviewInput {
+                attempt_id: attempt.id.clone(),
+                grade: 2,
+                idempotency_key: "obj-key".into(),
+            },
+        )
+        .expect_err("objected attempt must not confirm");
+        assert_eq!(err.code(), "attempt_objected");
+
+        let switched = switch_to_self(&conn, &attempt.id).unwrap();
+        assert_eq!(switched.status, "awaiting_self");
+        let open_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM objection WHERE attempt_id = ?1 AND status = 'open'",
+                [&attempt.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(open_count, 0);
+
+        let confirmed = confirm_review(
+            &conn,
+            ConfirmReviewInput {
+                attempt_id: attempt.id,
+                grade: 2,
+                idempotency_key: "obj-key".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(confirmed.mode, "self");
+    }
+
+    #[test]
+    fn forgot_answer_enters_awaiting_self_with_suggested_grade_zero() {
+        let conn = test_db();
+        accepted_card(&conn, "ai");
+        let attempt = open_attempt(&conn);
+        let answered = prepare_answer(&conn, &attempt.id, "【想不起来】", None).unwrap();
+        assert_eq!(answered.status, "awaiting_self");
+        assert_eq!(answered.feedback_mode.as_deref(), Some("self"));
+        assert_eq!(answered.suggested_grade, Some(0));
     }
 }

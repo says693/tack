@@ -108,19 +108,43 @@ fn invalid_lesson() -> AppError {
     )
 }
 
+fn normalize_ws(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join("")
+}
+
+fn strip_code_fence(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    if let Some(rest) = trimmed.strip_prefix("```") {
+        let after_first = rest.find('\n').map(|idx| &rest[idx + 1..]).unwrap_or(rest);
+        after_first.strip_suffix("```").unwrap_or(after_first).trim()
+    } else {
+        trimmed
+    }
+}
+
 pub fn validate_topic(raw: &str) -> AppResult<&str> {
     let topic = raw.trim();
+    if crate::study_sources::is_custom_material(topic) {
+        if !useful_text(topic, 1, 4000) {
+            return Err(AppError::user(
+                "invalid_topic",
+                "自定义学习资料内容需要在 1 到 4000 个字之间。",
+            ));
+        }
+        return Ok(topic);
+    }
     if !useful_text(topic, 1, 80) || topic.contains(['\n', '\r', '\t']) {
         return Err(AppError::user(
             "invalid_topic",
-            "请用 1 到 80 个字填写一个想学的科目。",
+            "请用 1 到 80 个字填写一个想学的科目，或粘贴不少于 40 字的学习资料。",
         ));
     }
     Ok(topic)
 }
 
 pub fn parse_lesson(raw: &str, sources: &[StudySource]) -> AppResult<PreparedLesson> {
-    let lesson: PreparedLesson = serde_json::from_str(raw).map_err(|_| invalid_lesson())?;
+    let lesson: PreparedLesson =
+        serde_json::from_str(strip_code_fence(raw)).map_err(|_| invalid_lesson())?;
     if !useful_text(&lesson.title, 2, 48)
         || !useful_text(&lesson.overview, 6, 220)
         || lesson.items.len() != 3
@@ -135,14 +159,16 @@ pub fn parse_lesson(raw: &str, sources: &[StudySource]) -> AppResult<PreparedLes
             .collect::<String>()
             .to_lowercase();
         let source = sources.iter().find(|source| source.id == item.source_id);
+        let norm_quote = normalize_ws(&item.quote);
         if !useful_text(&item.explanation, 8, 350)
             || !useful_text(&item.example, 6, 250)
             || !useful_text(&item.question, 4, 200)
             || !useful_text(&item.answer, 1, 300)
             || !useful_text(&item.correction, 4, 220)
-            || !useful_text(&item.quote, 6, 240)
+            || !useful_text(&item.quote, 6, 280)
+            || norm_quote.is_empty()
             || !questions.insert(question)
-            || source.is_none_or(|source| !source.text.contains(&item.quote))
+            || source.is_none_or(|source| !normalize_ws(&source.text).contains(&norm_quote))
         {
             return Err(invalid_lesson());
         }
@@ -410,6 +436,24 @@ fn new_round(conn: &Connection, lesson_id: &str, items: &[String], review: bool)
     Ok(())
 }
 
+pub fn clear_all(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch(
+        "DELETE FROM guided_attempt;
+         DELETE FROM guided_run;
+         DELETE FROM guided_item;
+         DELETE FROM guided_source;
+         DELETE FROM guided_lesson;",
+    )?;
+    Ok(())
+}
+
+pub fn reset(conn: &mut Connection) -> AppResult<()> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    clear_all(&tx)?;
+    tx.commit()?;
+    Ok(())
+}
+
 pub fn install(
     conn: &mut Connection,
     topic: &str,
@@ -419,12 +463,22 @@ pub fn install(
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     if let Some(existing) = active_run(&tx)? {
         if existing.lesson.topic == topic {
-            return Ok(());
+            let same_material = sources.iter().all(|source| {
+                tx.query_row(
+                    "SELECT material FROM guided_source WHERE lesson_id = ?1 AND id = ?2",
+                    params![existing.lesson.id, source.id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .ok()
+                .flatten()
+                .is_some_and(|material| material == source.text)
+            });
+            if same_material {
+                return Ok(());
+            }
         }
-        return Err(AppError::user(
-            "lesson_exists",
-            "这份学习库已经有课程，请重新打开折页继续。",
-        ));
+        clear_all(&tx)?;
     }
     let id = db::new_id("lesson");
     tx.execute(

@@ -46,6 +46,7 @@ export interface GuidedStudyApi {
   saveKey(apiKey: string): Promise<{ balanceAvailable: boolean }>;
   findSources(topic: string): Promise<GuidedSource[]>;
   generate(input: GuidedGenerateInput): Promise<GuidedRun>;
+  reset(): Promise<GuidedStatus>;
   getRun(): Promise<GuidedRun | null>;
   startQuestion(lessonId: string, cardId: string): Promise<GuidedRun>;
   saveDraft(input: { attemptId: string; draft: string }): Promise<void>;
@@ -64,6 +65,7 @@ export const guidedStudy: GuidedStudyApi = {
   saveKey: async (apiKey) => isTauri ? invoke('guided_save_key', { apiKey }) : (await mock()).saveKey(apiKey),
   findSources: async (topic) => isTauri ? invoke('guided_find_sources', { topic }) : (await mock()).findSources(topic),
   generate: async (input) => isTauri ? invoke('guided_generate', { input }) : (await mock()).generate(input),
+  reset: async () => isTauri ? invoke('guided_reset') : (await mock()).reset(),
   getRun: async () => isTauri ? invoke('guided_get_run') : (await mock()).getRun(),
   startQuestion: async (lessonId, cardId) => isTauri ? invoke('guided_start_question', { lessonId, cardId }) : (await mock()).startQuestion(lessonId, cardId),
   saveDraft: async (input) => isTauri ? invoke('guided_save_draft', input) : (await mock()).saveDraft(input),

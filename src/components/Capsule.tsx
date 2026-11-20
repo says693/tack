@@ -17,7 +17,7 @@ export function Capsule() {
         type="button"
         className="capsule-pill"
         onClick={exitCapsule}
-        title="展开折页 · Ctrl+Shift+Space"
+        title="展开折页"
       >
         <BrandMark className="capsule-mark" />
         <span className="capsule-copy">

@@ -396,9 +396,11 @@
 /* ── 复习 ─────────────────────────────────────────────────── */
 
 .answer-saved {
-  padding: 13px 14px;
-  border-left: 2px solid var(--accent);
-  background: var(--accent-soft);
+  padding: 13px 15px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-left: 2.5px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in srgb, var(--accent-soft) 72%, var(--bg-sunken));
 }
 
 .answer-saved-text {
@@ -503,6 +505,32 @@
 
 /* ── 小屏修正 ─────────────────────────────────────────────── */
 
+.guide-step-dots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-bottom: 2px;
+}
+
+.guide-step-dot {
+  flex: 1;
+  height: 3px;
+  border: 0;
+  padding: 0;
+  border-radius: 999px;
+  background: var(--line);
+  transition: background 180ms var(--ease);
+}
+
+.guide-step-dot.active {
+  background: var(--accent);
+}
+
+.guide-step-dot.done {
+  background: var(--jade);
+}
+
 @media (max-width: 620px) {
   [data-runtime='browser'] .app-root {
     padding: 12px 12px 62px;
@@ -519,5 +547,9 @@
 
   .session-actions .btn span {
     display: none;
+  }
+
+  .review-action-dock {
+    padding: 10px 14px;
   }
 }

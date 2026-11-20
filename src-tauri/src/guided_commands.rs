@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::State;
 
+use crate::db;
 use crate::error::{AppError, AppResult};
 use crate::guided::{self, Run};
 use crate::guided_credentials;
@@ -205,19 +206,19 @@ async fn complete(
         .ok_or_else(bad_response)
 }
 
-#[tauri::command]
-pub fn guided_status(state: State<'_, AppState>) -> AppResult<GuidedStatus> {
-    let run = guided_get_run(state.clone())?;
-    let model_configured = guided_credentials::read(&state.data_dir).map(|key| key.is_some());
+fn build_guided_status(conn: &Connection, data_dir: &std::path::Path) -> AppResult<GuidedStatus> {
+    let run = guided::get_run(conn)?;
+    let model_configured = guided_credentials::load_unified_key(conn, Some(data_dir)).is_some();
     Ok(GuidedStatus {
-        // A locked vault must not break an existing offline course.
-        model_configured: if run.is_some() {
-            model_configured.unwrap_or(false)
-        } else {
-            model_configured?
-        },
+        model_configured,
         run,
     })
+}
+
+#[tauri::command]
+pub fn guided_status(state: State<'_, AppState>) -> AppResult<GuidedStatus> {
+    let conn = state.db()?;
+    build_guided_status(&conn, &state.data_dir)
 }
 
 #[tauri::command]
@@ -235,12 +236,22 @@ pub async fn guided_save_key(
     let _request = state.guided_cloud.try_lock().map_err(|_| busy())?;
     let connection = account_balance(&client()?, BALANCE_ENDPOINT, key).await?;
     guided_credentials::write(&state.data_dir, key)?;
+    if let Ok(conn) = state.db() {
+        let _ = db::set_setting(&conn, "model.api_key", "");
+    }
     Ok(connection)
 }
 
 #[tauri::command]
 pub fn guided_find_sources(topic: String) -> AppResult<Vec<StudySource>> {
     Ok(study_sources::sources_for(guided::validate_topic(&topic)?))
+}
+
+#[tauri::command]
+pub fn guided_reset(state: State<'_, AppState>) -> AppResult<GuidedStatus> {
+    let mut conn = state.db()?;
+    guided::reset(&mut conn)?;
+    build_guided_status(&conn, &state.data_dir)
 }
 
 fn busy() -> AppError {
@@ -250,26 +261,27 @@ fn busy() -> AppError {
 #[tauri::command]
 pub async fn guided_generate(state: State<'_, AppState>, input: GenerateInput) -> AppResult<Run> {
     let (topic, sources) = authorized_sources(&input)?;
+    let display_topic = if study_sources::is_custom_material(topic) {
+        sources[0].title.as_str()
+    } else {
+        topic
+    };
     let _request = state.guided_cloud.try_lock().map_err(|_| busy())?;
-    {
+    let key = {
         let conn = state.db()?;
         if let Some(previous) = guided::existing_topic(&conn)? {
-            if previous == topic {
+            if previous == display_topic && !study_sources::is_custom_material(topic) {
                 return guided::get_run(&conn)?.ok_or_else(no_lesson);
             }
-            return Err(AppError::user(
-                "lesson_exists",
-                "已有一节已保存的课程，请返回学习。",
-            ));
         }
-    }
-    let key = guided_credentials::read(&state.data_dir)?
-        .ok_or_else(|| AppError::user("guided_key_rejected", "还没有连接 DeepSeek，请先连接。"))?;
-    let messages = generation_messages(topic, &sources);
+        guided_credentials::load_unified_key(&conn, Some(&state.data_dir))
+            .ok_or_else(|| AppError::user("guided_key_rejected", "还没有连接 DeepSeek，请先连接。"))?
+    };
+    let messages = generation_messages(display_topic, &sources);
     let response = complete(&client()?, ENDPOINT, &key, &messages).await?;
     let lesson = guided::parse_lesson(&response, &sources)?;
     let mut conn = state.db()?;
-    guided::install(&mut conn, topic, &sources, lesson)?;
+    guided::install(&mut conn, display_topic, &sources, lesson)?;
     guided::get_run(&conn)?.ok_or_else(no_lesson)
 }
 

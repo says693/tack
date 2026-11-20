@@ -221,9 +221,9 @@ ol {
 }
 
 [data-runtime='browser'] .hud-shell[data-mode='capsule'] {
-  --stage-width: 248px;
-  --stage-height: 96px;
-  border-radius: 26px;
+  --stage-width: 220px;
+  --stage-height: 60px;
+  border-radius: 999px;
 }
 
 [data-runtime='browser'] .hud-shell[data-mode='panel'] {
@@ -232,8 +232,8 @@ ol {
 }
 
 [data-runtime='browser'] .hud-shell[data-mode='guided'] {
-  width: min(100%, 720px);
-  height: min(100%, 720px);
+  --stage-width: 720px;
+  --stage-height: 720px;
 }
 
 .guided-legacy {
@@ -915,6 +915,61 @@ ol {
   line-height: 1.6;
 }
 
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.settings-note {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--amber);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--amber-soft) 68%, var(--surface));
+  color: var(--text-2);
+  font-size: 11.5px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.privacy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.privacy-list li {
+  position: relative;
+  padding-left: 14px;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.privacy-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 4px;
+  height: 4px;
+  border-radius: 1px;
+  background: var(--accent);
+  opacity: 0.78;
+}
+
+@media (max-width: 500px) {
+  .form-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .progress-track {
   height: 3px;
   border-radius: 3px;
@@ -938,26 +993,31 @@ ol {
   align-items: center;
   justify-content: center;
   background: transparent;
-  padding: 8px;
+  padding: 5px 6px;
 }
 
 .capsule-pill {
   width: 100%;
-  height: 46px;
+  height: 44px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 13px;
+  gap: 9px;
+  padding: 0 12px;
   border: 1px solid var(--line-strong);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-raised) 94%, transparent);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  background: color-mix(in srgb, var(--bg-raised) 96%, transparent);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.24);
   color: var(--text);
   text-align: left;
   transition:
     border-color 180ms var(--ease),
     transform 180ms var(--ease),
     background 180ms var(--ease);
+}
+
+:root[data-theme='paper'] .capsule-pill {
+  background: color-mix(in srgb, var(--paper) 97%, white);
+  box-shadow: 0 3px 10px rgba(47, 38, 25, 0.14);
 }
 
 .capsule-pill:hover {

@@ -75,6 +75,27 @@ fn find_or_create_concept(
     Ok(id)
 }
 
+fn resolve_evidence(chunk: Option<&ChunkView>, raw_excerpt: &str) -> AppResult<(Option<String>, String)> {
+    let Some(ch) = chunk else {
+        return Ok((None, String::new()));
+    };
+    let excerpt = if raw_excerpt.trim().is_empty() {
+        text::truncate_chars(&ch.quote_exact, 220)
+    } else {
+        let excerpt = raw_excerpt.trim();
+        let normalized_excerpt = excerpt.split_whitespace().collect::<String>();
+        let normalized_text = ch.quote_exact.split_whitespace().collect::<String>();
+        if !normalized_text.contains(&normalized_excerpt) {
+            return Err(AppError::user(
+                "evidence_unmatched",
+                "证据摘录不在所选原文片段中，已拒绝保存。",
+            ));
+        }
+        excerpt.to_string()
+    };
+    Ok((Some(ch.id.clone()), excerpt))
+}
+
 pub fn create_draft(conn: &Connection, input: CardDraftInput) -> AppResult<CardDetail> {
     let concept_name = input.concept_name.trim();
     let question = input.question.trim();
@@ -95,25 +116,7 @@ pub fn create_draft(conn: &Connection, input: CardDraftInput) -> AppResult<CardD
         .map(|id| get_chunk(conn, id))
         .transpose()?;
     validate_origin(&input.exercise_origin, mode, question, chunk.as_ref())?;
-    let (evidence_id, evidence_excerpt) = if let Some(ch) = chunk.as_ref() {
-        let excerpt = if input.evidence_excerpt.trim().is_empty() {
-            text::truncate_chars(&ch.quote_exact, 220)
-        } else {
-            let excerpt = input.evidence_excerpt.trim();
-            let normalized_excerpt = excerpt.split_whitespace().collect::<String>();
-            let normalized_text = ch.quote_exact.split_whitespace().collect::<String>();
-            if !normalized_text.contains(&normalized_excerpt) {
-                return Err(AppError::user(
-                    "evidence_unmatched",
-                    "证据摘录不在所选原文片段中，已拒绝保存。",
-                ));
-            }
-            excerpt.to_string()
-        };
-        (Some(ch.id.clone()), excerpt)
-    } else {
-        (None, String::new())
-    };
+    let (evidence_id, evidence_excerpt) = resolve_evidence(chunk.as_ref(), &input.evidence_excerpt)?;
     let source_id = chunk.as_ref().map(|c| c.source_id.clone());
     let chunk_id = chunk.as_ref().map(|c| c.id.clone());
     let concept_id = find_or_create_concept(conn, concept_name, source_id.as_deref(), chunk_id.as_deref())?;
@@ -182,22 +185,16 @@ pub fn update_card(conn: &Connection, card_id: &str, input: CardRevisionInput) -
     if question.is_empty() || answer.is_empty() {
         return Err(AppError::user("card_incomplete", "问题与答案都不能为空。"));
     }
+    if question.chars().count() > 500 || answer.chars().count() > 4000 {
+        return Err(AppError::user("card_too_long", "题目或答案过长。"));
+    }
     let chunk = input
         .evidence_chunk_id
         .as_deref()
         .map(|id| get_chunk(conn, id))
         .transpose()?;
     validate_origin(&input.exercise_origin, &card.mode, question, chunk.as_ref())?;
-    let (evidence_id, evidence_excerpt) = if let Some(ch) = chunk.as_ref() {
-        let excerpt = if input.evidence_excerpt.trim().is_empty() {
-            text::truncate_chars(&ch.quote_exact, 220)
-        } else {
-            input.evidence_excerpt.trim().to_string()
-        };
-        (Some(ch.id.clone()), excerpt)
-    } else {
-        (None, String::new())
-    };
+    let (evidence_id, evidence_excerpt) = resolve_evidence(chunk.as_ref(), &input.evidence_excerpt)?;
     let current = card
         .revision_id
         .as_deref()
@@ -288,8 +285,24 @@ pub fn accept_card(conn: &Connection, card_id: &str) -> AppResult<CardDetail> {
     if card.status != "draft" {
         return Err(AppError::user("card_not_draft", "只有草稿可以「收下」。"));
     }
-    if card.revision_id.is_none() {
+    let Some(rev_id) = card.revision_id.as_deref() else {
         return Err(AppError::user("card_incomplete", "卡片没有内容。"));
+    };
+    let source_archived: bool = conn
+        .query_row(
+            "SELECT COALESCE((SELECT s.archived_at IS NOT NULL
+                              FROM card_revision cr
+                              JOIN chunk ch ON ch.id = cr.evidence_chunk_id
+                              JOIN source s ON s.id = ch.source_id
+                              WHERE cr.id = ?1), 0)",
+            [rev_id],
+            |r| r.get(0),
+        )?;
+    if source_archived {
+        return Err(AppError::user(
+            "source_archived",
+            "这张卡片关联的来源已被删除，请先重新绑定有效原文后再收下。",
+        ));
     }
     conn.execute(
         "UPDATE card SET status = 'active', paused_reason = NULL, updated_at = ?1 WHERE id = ?2",

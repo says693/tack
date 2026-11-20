@@ -36,7 +36,7 @@ pub fn get_overview(state: State<'_, AppState>) -> AppResult<Overview> {
 pub fn get_settings(state: State<'_, AppState>) -> AppResult<SettingsView> {
     let conn = state.db()?;
     Ok(SettingsView {
-        model: repo::model_status(&conn),
+        model: repo::model_status(&conn, &state.data_dir),
         study: repo::study_settings(&conn),
     })
 }
@@ -65,16 +65,17 @@ pub fn save_model_config(state: State<'_, AppState>, input: ModelConfigInput) ->
     let same_endpoint = old_url.trim_end_matches('/') == base_url
         || (matches!(old_url.trim_end_matches('/'), "https://api.deepseek.com" | "https://api.deepseek.com/v1")
             && matches!(base_url.as_str(), "https://api.deepseek.com" | "https://api.deepseek.com/v1"));
-    if !same_endpoint && new_key.is_none()
-        && db::get_setting(&conn, "model.api_key").is_some_and(|key| !key.trim().is_empty())
-    {
+    let has_existing_key =
+        crate::guided_credentials::load_unified_key(&conn, Some(&state.data_dir)).is_some();
+    if !same_endpoint && new_key.is_none() && has_existing_key {
         return Err(AppError::user("endpoint_key_required", "切换服务地址需要填写对应的新密钥，或先清除旧密钥。"));
     }
     db::set_setting(&conn, "model.provider", provider)?;
     db::set_setting(&conn, "model.base_url", &base_url)?;
     db::set_setting(&conn, "model.model", input.model.trim())?;
     if let Some(key) = new_key {
-        db::set_setting(&conn, "model.api_key", key)?;
+        crate::guided_credentials::write(&state.data_dir, key)?;
+        db::set_setting(&conn, "model.api_key", "")?;
     }
     if let Some(temp) = input.temperature {
         let temp = temp.clamp(0.0, 1.5);
@@ -88,23 +89,24 @@ pub fn save_model_config(state: State<'_, AppState>, input: ModelConfigInput) ->
         "model_configured",
         &json!({"provider": provider, "model": input.model, "baseUrl": base_url}).to_string(),
     )?;
-    Ok(repo::model_status(&conn))
+    Ok(repo::model_status(&conn, &state.data_dir))
 }
 
 #[tauri::command]
 pub fn clear_api_key(state: State<'_, AppState>) -> AppResult<ModelStatus> {
     let conn = state.db()?;
+    crate::guided_credentials::clear(&state.data_dir)?;
     db::set_setting(&conn, "model.api_key", "")?;
     db::set_setting(&conn, "model.last_test_ok", "")?;
     db::set_setting(&conn, "model.last_test_message", "已清除密钥")?;
-    Ok(repo::model_status(&conn))
+    Ok(repo::model_status(&conn, &state.data_dir))
 }
 
 #[tauri::command]
 pub async fn test_model_connection(state: State<'_, AppState>) -> AppResult<TestModelResult> {
     let config = {
         let conn = state.db()?;
-        LlmConfig::load(&conn).ok_or_else(|| {
+        LlmConfig::load_for_dir(&conn, &state.data_dir).ok_or_else(|| {
             AppError::user(
                 "model_not_configured",
                 "还没有可用的模型配置。请先填写 Base URL、模型名和密钥。",
@@ -482,8 +484,9 @@ fn open_path(path: &Path) -> AppResult<()> {
 #[tauri::command]
 pub fn set_window_mode(window: WebviewWindow, mode: String) -> AppResult<()> {
     let guided = mode == "guided";
+    let is_capsule = mode == "capsule";
     let _ = window.set_decorations(guided);
-    let _ = window.set_skip_taskbar(mode == "capsule");
+    let _ = window.set_skip_taskbar(is_capsule);
     if guided {
         let _ = window.set_always_on_top(false);
     }
@@ -496,27 +499,61 @@ pub fn set_window_mode(window: WebviewWindow, mode: String) -> AppResult<()> {
         "settings" => (860.0, 820.0),
         _ => (480.0, 780.0),
     };
-    window
-        .set_size(tauri::LogicalSize::new(w, h))
-        .map_err(|e| AppError::Internal(format!("窗口尺寸调整失败：{e}")))?;
-    if let Ok(Some(monitor)) = window.current_monitor() {
-        let scale = monitor.scale_factor();
-        let size = monitor.size().to_logical::<f64>(scale);
-        let margin = 18.0;
-        let centered = guided || matches!(mode.as_str(), "panorama" | "review" | "settings");
-        let (x, y) = if mode == "capsule" {
-            (size.width - w - margin, (size.height - h) / 2.0)
-        } else if centered {
-            ((size.width - w) / 2.0, (size.height - h) / 2.0)
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let current_logical = window
+        .inner_size()
+        .ok()
+        .map(|s| s.to_logical::<f64>(scale));
+    let was_capsule = current_logical
+        .as_ref()
+        .is_some_and(|s| s.width < 280.0 || s.height < 120.0);
+    let was_visible = window.is_visible().unwrap_or(true);
+    let needs_resize = is_capsule
+        || was_capsule
+        || !was_visible
+        || current_logical
+            .as_ref()
+            .is_none_or(|s| s.width < w - 24.0 || s.height < h - 24.0);
+
+    let (final_w, final_h) = if needs_resize {
+        let target_w = if is_capsule || was_capsule || !was_visible {
+            w
         } else {
-            (size.width - w - 24.0, ((size.height - h) / 2.0).max(20.0))
+            current_logical.as_ref().map_or(w, |s| s.width.max(w))
+        };
+        let target_h = if is_capsule || was_capsule || !was_visible {
+            h
+        } else {
+            current_logical.as_ref().map_or(h, |s| s.height.max(h))
         };
         window
-            .set_position(tauri::LogicalPosition::new(x.max(0.0), y.max(0.0)))
-            .map_err(|e| AppError::Internal(format!("窗口位置调整失败：{e}")))?;
+            .set_size(tauri::LogicalSize::new(target_w, target_h))
+            .map_err(|e| AppError::Internal(format!("窗口尺寸调整失败：{e}")))?;
+        (target_w, target_h)
+    } else {
+        current_logical.map_or((w, h), |s| (s.width, s.height))
+    };
+
+    if is_capsule || was_capsule || !was_visible {
+        if let Ok(Some(monitor)) = window.current_monitor() {
+            let m_scale = monitor.scale_factor();
+            let size = monitor.size().to_logical::<f64>(m_scale);
+            let margin = 18.0;
+            let centered = guided || matches!(mode.as_str(), "panorama" | "review" | "settings");
+            let (x, y) = if is_capsule {
+                (size.width - final_w - margin, (size.height - final_h) / 2.0)
+            } else if centered {
+                ((size.width - final_w) / 2.0, (size.height - final_h) / 2.0)
+            } else {
+                (size.width - final_w - 24.0, ((size.height - final_h) / 2.0).max(20.0))
+            };
+            window
+                .set_position(tauri::LogicalPosition::new(x.max(0.0), y.max(0.0)))
+                .map_err(|e| AppError::Internal(format!("窗口位置调整失败：{e}")))?;
+        }
     }
     let _ = window.show();
-    if mode != "capsule" {
+    if !is_capsule {
         let _ = window.set_focus();
     }
     Ok(())
@@ -560,10 +597,13 @@ pub async fn submit_answer(
     let (attempt, context, config, notice_seen) = {
         let conn = state.db()?;
         let attempt = review::prepare_answer(&conn, &input.attempt_id, &input.answer, input.latency_ms)?;
-        if attempt.card.mode == "self" {
+        if attempt.card.mode == "self"
+            || attempt.feedback_mode.as_deref() == Some("self")
+            || attempt.status == "awaiting_self"
+        {
             return Ok(attempt);
         }
-        let config = LlmConfig::load(&conn);
+        let config = LlmConfig::load_for_dir(&conn, &state.data_dir);
         let context = review::grade_context(&conn, &input.attempt_id)?;
         let notice_seen = db::get_setting(&conn, "privacy.cloud_notice_seen").as_deref() == Some("1");
         (attempt, context, config, notice_seen)
@@ -623,7 +663,7 @@ pub async fn retry_grade(
         if attempt.status == "confirmed" || attempt.status == "feedback" || attempt.status == "insufficient" {
             return Ok(attempt);
         }
-        let config = LlmConfig::load(&conn);
+        let config = LlmConfig::load_for_dir(&conn, &state.data_dir);
         let context = review::grade_context(&conn, &attempt_id)?;
         let notice_seen = db::get_setting(&conn, "privacy.cloud_notice_seen").as_deref() == Some("1");
         (attempt, context, config, notice_seen)
@@ -680,7 +720,7 @@ pub async fn generate_card_draft(
             })?;
         let chunk = repo::get_chunk(&conn, &chunk_id)?;
         let source_title = repo::get_source(&conn, &chunk.source_id).ok().map(|s| s.title);
-        let config = LlmConfig::load(&conn);
+        let config = LlmConfig::load_for_dir(&conn, &state.data_dir);
         let notice_seen = db::get_setting(&conn, "privacy.cloud_notice_seen").as_deref() == Some("1");
         (session, chunk, config, notice_seen, source_title)
     };
@@ -770,7 +810,7 @@ pub async fn send_message(
     let (session, context, config, user_message, assistant_message) = {
         let conn = state.db()?;
         let session = repo::get_session_summary(&conn, &session_id)?;
-        let config = LlmConfig::load(&conn).ok_or_else(|| {
+        let config = LlmConfig::load_for_dir(&conn, &state.data_dir).ok_or_else(|| {
             AppError::user(
                 "model_not_configured",
                 "模型未配置。请先在设置里填写 Base URL、模型名和密钥。",

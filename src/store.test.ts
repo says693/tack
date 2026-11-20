@@ -7,6 +7,7 @@ import type { Bootstrap, StudySettings } from '@/types';
 vi.mock('@/lib/api', () => ({
   api: {
     bootstrap: vi.fn(),
+    completeOnboarding: vi.fn(),
     uiReady: vi.fn(),
     saveUiPrefs: vi.fn(),
     saveStudySettings: vi.fn(),
@@ -84,6 +85,7 @@ beforeEach(async () => {
   vi.stubGlobal('document', { documentElement: { dataset: {}, style: {} } });
   vi.stubGlobal('window', { setTimeout: vi.fn() });
   vi.mocked(api.bootstrap).mockResolvedValue(bootstrap);
+  vi.mocked(api.completeOnboarding).mockResolvedValue({ ok: true, changed: true });
   vi.mocked(api.uiReady).mockResolvedValue(undefined);
   vi.mocked(api.setWindowMode).mockResolvedValue(undefined);
   vi.mocked(api.saveUiPrefs).mockResolvedValue(undefined);
@@ -146,4 +148,42 @@ it('returns from settings to the originating window mode without resizing on cat
   expect(vi.mocked(api.setWindowMode).mock.calls).toEqual([['panorama'], ['settings'], ['panorama']]);
   navigate(session, { mode: 'panorama' });
   expect(api.setWindowMode).toHaveBeenCalledTimes(4);
+});
+
+describe('Phase 2 navigation & onboarding state', () => {
+  it('marks bootstrap as onboarded via completeOnboarding', async () => {
+    vi.mocked(api.bootstrap).mockResolvedValueOnce({ ...bootstrap, isFirstRun: true });
+    useApp.setState(initial, true);
+    await useApp.getState().init();
+    expect(useApp.getState().bootstrap?.isFirstRun).toBe(true);
+
+    await useApp.getState().markOnboarded();
+    expect(api.completeOnboarding).toHaveBeenCalledTimes(1);
+    expect(useApp.getState().bootstrap?.isFirstRun).toBe(false);
+  });
+
+  it('preserves originating view across enterCapsule / exitCapsule', () => {
+    const { navigate, enterCapsule, exitCapsule } = useApp.getState();
+    navigate({ name: 'study' });
+    enterCapsule();
+    expect(useApp.getState().view).toEqual({ name: 'capsule' });
+    expect(useApp.getState().windowMode).toBe('capsule');
+
+    exitCapsule();
+    expect(useApp.getState().view).toEqual({ name: 'study' });
+    expect(useApp.getState().windowMode).toBe('guided');
+  });
+
+  it('keeps onboarding and study views intact on fold:shortcut and fold:navigate', () => {
+    const { navigate, handleAppEvent } = useApp.getState();
+    navigate({ name: 'study' });
+    handleAppEvent('fold:shortcut');
+    expect(useApp.getState().view).toEqual({ name: 'study' });
+    handleAppEvent('fold:navigate', 'review');
+    expect(useApp.getState().view).toEqual({ name: 'study' });
+
+    navigate({ name: 'onboarding' });
+    handleAppEvent('fold:shortcut');
+    expect(useApp.getState().view).toEqual({ name: 'onboarding' });
+  });
 });

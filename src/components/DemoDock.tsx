@@ -2,6 +2,7 @@ import { isBrowserPreview } from '@/lib/bridge';
 import { useApp } from '@/store';
 
 const STORAGE_KEY = 'fold:mock:v3';
+const GUIDED_STORAGE_KEY = 'fold:guided-preview:v1';
 
 export function DemoDock() {
   const view = useApp((state) => state.view);
@@ -95,6 +96,13 @@ export function DemoDock() {
         <span className="demo-dock-sep" />
         <button
           type="button"
+          onClick={() => navigate({ name: 'onboarding' })}
+          title="进入引导学习"
+        >
+          引导
+        </button>
+        <button
+          type="button"
           onClick={() => navigate({ name: 'capsule' }, { mode: 'capsule' })}
           title="胶囊态"
         >
@@ -111,6 +119,7 @@ export function DemoDock() {
           type="button"
           onClick={() => {
             localStorage.removeItem(STORAGE_KEY);
+            localStorage.removeItem(GUIDED_STORAGE_KEY);
             window.location.href = `${window.location.pathname}?fresh=1`;
           }}
           title="重置本地演示数据"

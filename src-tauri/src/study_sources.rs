@@ -146,7 +146,17 @@ impl Catalog {
         let topic = self
             .topics
             .iter()
-            .find(|topic| topic.aliases.contains(&key))?;
+            .find(|topic| topic.aliases.contains(&key))
+            .or_else(|| {
+                if key.chars().count() < 2 {
+                    return None;
+                }
+                self.topics.iter().find(|topic| {
+                    topic.title.to_ascii_lowercase().contains(&key)
+                        || topic.scope.to_ascii_lowercase().contains(&key)
+                        || topic.aliases.iter().any(|alias| alias.contains(&key))
+                })
+            })?;
         Some(StudySource {
             id: topic.id.clone(),
             title: topic.title.clone(),
@@ -159,7 +169,52 @@ impl Catalog {
     }
 }
 
+pub fn is_custom_material(subject: &str) -> bool {
+    let trimmed = subject.trim();
+    trimmed.starts_with("自定义：")
+        || trimmed.starts_with("自定义:")
+        || trimmed.chars().count() >= 40
+}
+
+fn custom_source_from_input(subject: &str) -> Option<StudySource> {
+    let trimmed = subject.trim();
+    if !is_custom_material(trimmed) {
+        return None;
+    }
+    let body = trimmed
+        .strip_prefix("自定义：")
+        .or_else(|| trimmed.strip_prefix("自定义:"))
+        .unwrap_or(trimmed)
+        .trim();
+    if body.chars().count() < 6 {
+        return None;
+    }
+    let first_line = body
+        .lines()
+        .map(|line| line.trim().trim_start_matches('#').trim())
+        .find(|line| !line.is_empty())
+        .unwrap_or("自定义学习资料");
+    let title = if first_line.chars().count() > 18 {
+        let head: String = first_line.chars().take(18).collect();
+        format!("{head}…")
+    } else {
+        first_line.to_string()
+    };
+    Some(StudySource {
+        id: "custom-user-source".into(),
+        title,
+        publisher: "用户自定义资料".into(),
+        url: "https://fold.local/custom".into(),
+        license: "用户提供的本地学习材料；仅在授权生成本次课程时发送。".into(),
+        scope: "自定义资料核心要点".into(),
+        text: body.to_string(),
+    })
+}
+
 pub fn sources_for(subject: &str) -> Vec<StudySource> {
+    if let Some(custom) = custom_source_from_input(subject) {
+        return vec![custom];
+    }
     CATALOG
         .get_or_init(|| Catalog::from_json(CATALOG_JSON))
         .as_ref()
@@ -351,5 +406,41 @@ mod tests {
                 .any(|part| part == sentence));
             assert!(source.text.ends_with('。'));
         }
+    }
+
+    #[test]
+    fn keyword_substrings_and_new_topics_match_accurately() {
+        for (query, expected_id) in [
+            ("反射", "optics-reflection"),
+            ("方程", "algebra-linear-equations"),
+            ("for循环", "python-control-flow"),
+            ("HTTP", "network-http-basics"),
+            ("计算机网络", "network-http-basics"),
+            ("氧化", "chemistry-redox"),
+            ("氧化还原", "chemistry-redox"),
+        ] {
+            let found = sources_for(query);
+            assert_eq!(found.len(), 1, "{query:?}");
+            assert_eq!(found[0].id, expected_id, "{query:?}");
+        }
+    }
+
+    #[test]
+    fn custom_material_builds_dynamic_source_for_long_or_prefixed_input() {
+        let prefixed = "自定义：# 细胞膜结构\n磷脂双分子层构成细胞膜的基本支架。";
+        let found = sources_for(prefixed);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, "custom-user-source");
+        assert_eq!(found[0].publisher, "用户自定义资料");
+        assert_eq!(found[0].title, "细胞膜结构");
+        assert!(found[0].text.contains("磷脂双分子层"));
+
+        let long_text = "这是一段超过四十个字的自定义学习笔记：热力学第一定律说明能量既不能凭空产生，也不能凭空消失，只能从一种形式转化为另一种形式。";
+        let found_long = sources_for(long_text);
+        assert_eq!(found_long.len(), 1);
+        assert_eq!(found_long[0].id, "custom-user-source");
+        assert_eq!(found_long[0].text, long_text);
+
+        assert!(sources_for("自定义：太短").is_empty());
     }
 }

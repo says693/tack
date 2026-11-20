@@ -81,8 +81,13 @@ export function TodayScreen() {
   const fresh = overview?.newAvailable ?? 0;
   const completed = overview?.completedToday ?? 0;
   const served = overview?.reviewServedToday ?? 0;
+  const newServed = overview?.newServedToday ?? 0;
   const newLimit = overview?.newLimit ?? 10;
   const reviewLimit = overview?.reviewLimit ?? 50;
+  const reviewRemaining = Math.max(0, reviewLimit - served);
+  const newRemaining = Math.max(0, newLimit - newServed);
+  const freshToday = Math.min(fresh, newRemaining);
+  const totalDayTarget = Math.max(1, completed + Math.min(due, reviewRemaining) + freshToday);
   const week = overview?.last7 ?? [];
   const weekMax = Math.max(1, ...week.map((day) => day.reviews));
   const weekTotal = week.reduce((sum, day) => sum + day.reviews, 0);
@@ -91,27 +96,42 @@ export function TodayScreen() {
 
   let heroTitle;
   let heroSub;
-  if (due > 0) {
+  let primaryLabel: string;
+  let primaryTarget: 'review' | 'library';
+  let eyebrow: string;
+  if (due > 0 && reviewRemaining > 0) {
+    eyebrow = "Today's review";
     heroTitle = (
       <>
         有 <em>{due}</em> 个概念，等你先想起来。
       </>
     );
     heroSub = '合上书作答。批改只提示可核对之处，最终评级由你决定。';
-  } else if (fresh > 0) {
+    primaryLabel = '开始复习';
+    primaryTarget = 'review';
+  } else if (freshToday > 0) {
+    eyebrow = 'New leaves';
     heroTitle = (
       <>
-        今天先种下 <em>{fresh}</em> 张新卡。
+        今天可领 <em>{freshToday}</em> 张新卡。
       </>
     );
-    heroSub = `新卡默认每天 ${newLimit} 张。收下草稿后，才会真正进入队列。`;
+    heroSub = `新卡每日上限 ${newLimit} 张${fresh > freshToday ? `（书库共 ${fresh} 张待学）` : ''}。收下草稿后，才会真正进入队列。`;
+    primaryLabel = '开始今日新卡';
+    primaryTarget = 'review';
+  } else if (due > 0 || fresh > 0) {
+    eyebrow = 'Quota reached';
+    heroTitle = <>今天的额度已经用完。</>;
+    heroSub = `今日配额已完成；剩余 ${due} 个到期概念保留原到期日，明天继续。`;
+    primaryLabel = '浏览书架';
+    primaryTarget = 'library';
   } else {
+    eyebrow = 'All clear';
     heroTitle = <>今天的页，已经合上。</>;
     heroSub = '没有到期复习，也没有新卡。去读一段新材料，或整理一张卡片。';
+    primaryLabel = '去读一段';
+    primaryTarget = 'library';
   }
-
-  const primaryLabel = due > 0 ? '开始复习' : fresh > 0 ? '开始今日新卡' : '去读一段';
-  const primaryTarget = due > 0 || fresh > 0 ? 'review' : 'library';
 
   return (
     <div className="today-screen">
@@ -140,7 +160,7 @@ export function TodayScreen() {
 
         <section className="review-hero">
           <div>
-            <div className="hero-eyebrow">{due > 0 ? "Today's review" : fresh > 0 ? 'New leaves' : 'All clear'}</div>
+            <div className="hero-eyebrow">{eyebrow}</div>
             <h2 className="hero-title">{heroTitle}</h2>
             <p className="hero-sub">{heroSub}</p>
             <div className="hero-actions">
@@ -195,20 +215,20 @@ export function TodayScreen() {
             <div className="progress-track stat-bar">
               <div
                 className="progress-fill"
-                style={{ width: `${reviewLimit > 0 ? Math.min(100, (completed / reviewLimit) * 100) : 0}%` }}
+                style={{ width: `${Math.min(100, (completed / totalDayTarget) * 100)}%` }}
               />
             </div>
           </div>
           <div className="stat-box">
-            <div className="stat-label">新卡可用</div>
+            <div className="stat-label">今日新卡</div>
             <div className="stat-value">
-              {fresh}
-              <small> 张</small>
+              {freshToday}
+              <small> 张{fresh > freshToday ? ` / ${fresh}` : ''}</small>
             </div>
             <div className="progress-track stat-bar">
               <div
                 className="progress-fill"
-                style={{ width: `${newLimit > 0 ? Math.min(100, (fresh / newLimit) * 100) : 0}%` }}
+                style={{ width: `${newLimit > 0 ? Math.min(100, (newServed / newLimit) * 100) : 0}%` }}
               />
             </div>
           </div>

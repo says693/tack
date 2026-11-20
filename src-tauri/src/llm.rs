@@ -20,11 +20,20 @@ pub struct LlmConfig {
 }
 
 impl LlmConfig {
+    #[cfg(test)]
     pub fn load(conn: &rusqlite::Connection) -> Option<Self> {
+        Self::load_inner(conn, None)
+    }
+
+    pub fn load_for_dir(conn: &rusqlite::Connection, data_dir: &std::path::Path) -> Option<Self> {
+        Self::load_inner(conn, Some(data_dir))
+    }
+
+    fn load_inner(conn: &rusqlite::Connection, data_dir: Option<&std::path::Path>) -> Option<Self> {
         let base_url = db::get_setting(conn, "model.base_url").unwrap_or_default();
         let model = db::get_setting(conn, "model.model").unwrap_or_default();
         let provider = db::get_setting(conn, "model.provider").unwrap_or_else(|| "deepseek".into());
-        let api_key = db::get_setting(conn, "model.api_key").unwrap_or_default();
+        let api_key = crate::guided_credentials::load_unified_key(conn, data_dir).unwrap_or_default();
         let temperature = db::get_setting_f64(conn, "model.temperature", 0.2);
         if base_url.trim().is_empty() || model.trim().is_empty() {
             return None;

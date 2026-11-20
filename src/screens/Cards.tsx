@@ -41,6 +41,7 @@ export function CardsScreen({ initialStatus }: { initialStatus?: string }) {
   const overview = useApp((state) => state.overview);
   const navigate = useApp((state) => state.navigate);
   const refreshOverview = useApp((state) => state.refreshOverview);
+  const markOnboarded = useApp((state) => state.markOnboarded);
   const toast = useApp((state) => state.toast);
   const [filter, setFilter] = useState(initialStatus ?? 'all');
   const [cards, setCards] = useState<CardSummary[]>([]);
@@ -86,6 +87,11 @@ export function CardsScreen({ initialStatus }: { initialStatus?: string }) {
   }
 
   async function resume(card: CardSummary) {
+    if (card.pausedReason?.includes('修订') || card.pausedReason?.includes('来源')) {
+      toast('info', '需要先确认排期或核对来源', '请先在卡片详情核对变更，再选择保留或重置排期。');
+      navigate({ name: 'card', cardId: card.id });
+      return;
+    }
     setBusyId(card.id);
     try {
       await api.resolveCardRevision(card.id, 'keep');
@@ -125,7 +131,7 @@ export function CardsScreen({ initialStatus }: { initialStatus?: string }) {
         sessionId: null,
       });
       setManualOpen(false);
-      await Promise.all([load(), refreshOverview()]);
+      await Promise.all([load(), refreshOverview(), markOnboarded()]);
       toast('success', '已保存为自评草稿', '还没有进入队列。检查题目与答案后，再点「收下」。');
       navigate({ name: 'card', cardId: detail.summary.id });
     } catch (err) {

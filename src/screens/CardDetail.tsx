@@ -298,6 +298,7 @@ export function CardDetailScreen({ cardId }: { cardId: string }) {
             <p className="field-hint" style={{ marginTop: 5 }}>
               {summary.pausedReason || '排期已暂停，不会出现在队列里。'}
               {summary.pausedReason?.includes('修订') ? ' 这次修订改变了题目或答案的含义。' : ''}
+              {summary.pausedReason?.includes('来源') ? ' 原材料已被移除或变更，建议先核对下方证据与题目。' : ''}
             </p>
             <div className="decision-actions">
               <button type="button" className="btn btn-sm btn-subtle" disabled={Boolean(busy)} onClick={() => void resolve('keep')}>

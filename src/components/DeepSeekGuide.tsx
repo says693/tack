@@ -58,15 +58,15 @@ export function DeepSeekGuide({
       onClose={close}
       footer={
         <div className="guide-actions">
-          <button type="button" className="btn btn-ghost" autoFocus onClick={() => step ? go(step - 1) : close()}>
+          <button type="button" className="btn btn-ghost" onClick={() => step ? go(step - 1) : close()}>
             {step ? <><ArrowLeft size={14} /> 上一步</> : guided ? '返回连接' : '暂不配置'}
           </button>
           {step < 2 ? (
-            <button type="button" className="btn btn-primary" onClick={() => go(step + 1)}>
+            <button type="button" className="btn btn-primary" autoFocus onClick={() => go(step + 1)}>
               下一步 <ArrowRight size={14} />
             </button>
           ) : (
-            <button type="button" className="btn btn-primary" onClick={() => { close(); onConfigure(); }}>
+            <button type="button" className="btn btn-primary" autoFocus onClick={() => { close(); onConfigure(); }}>
               <Settings2 size={14} /> {guided ? '返回连接 AI' : isTauri ? '前往模型设置' : '查看设置预览'}
             </button>
           )}
@@ -74,6 +74,18 @@ export function DeepSeekGuide({
       }
     >
       <div className="guide-step">
+        <div className="guide-step-dots" role="tablist" aria-label="步骤导航">
+          {[0, 1, 2].map((index) => (
+            <button
+              key={index}
+              type="button"
+              className={`guide-step-dot${index === step ? ' active' : index < step ? ' done' : ''}`}
+              aria-label={`第 ${index + 1} 步`}
+              aria-selected={index === step}
+              onClick={() => go(index)}
+            />
+          ))}
+        </div>
         <h3 tabIndex={-1} ref={nextHeading}>
           {['打开 DeepSeek 官方入口', '登录并创建密钥', '在折页配置并测试'][step]}
         </h3>

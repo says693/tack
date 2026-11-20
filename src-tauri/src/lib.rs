@@ -68,6 +68,7 @@ pub fn run() {
             guided_commands::guided_save_key,
             guided_commands::guided_find_sources,
             guided_commands::guided_generate,
+            guided_commands::guided_reset,
             guided_commands::guided_get_run,
             guided_commands::guided_start_question,
             guided_commands::guided_save_draft,

@@ -37,12 +37,14 @@ interface AppStore {
   model: ModelStatus | null;
   view: View;
   history: NavigationEntry[];
+  capsuleReturn: NavigationEntry | null;
   windowMode: WindowMode;
   pinned: boolean;
   theme: Theme;
   toasts: ToastMessage[];
   cloudOpen: boolean;
   init: () => Promise<void>;
+  markOnboarded: () => Promise<void>;
   refreshAll: () => Promise<void>;
   refreshOverview: () => Promise<void>;
   refreshLibrary: () => Promise<void>;
@@ -112,6 +114,7 @@ export const useApp = create<AppStore>((set, get) => ({
   model: null,
   view: { name: 'today' },
   history: [],
+  capsuleReturn: null,
   windowMode: 'panel',
   pinned: false,
   theme: 'ink',
@@ -155,6 +158,13 @@ export const useApp = create<AppStore>((set, get) => ({
       const normalized = normalizeError(error);
       set({ ready: true, fatalError: normalized.message });
     }
+  },
+
+  markOnboarded: async () => {
+    set((state) => ({
+      bootstrap: state.bootstrap ? { ...state.bootstrap, isFirstRun: false } : state.bootstrap,
+    }));
+    await api.completeOnboarding?.().catch(() => undefined);
   },
 
   refreshAll: async () => {
@@ -234,18 +244,22 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   enterCapsule: () => {
+    const { view: current, windowMode } = get();
+    const capsuleReturn = current.name === 'capsule' ? get().capsuleReturn : { view: current, windowMode };
     const view: View = { name: 'capsule' };
-    set({ view, windowMode: 'capsule' });
+    set({ view, windowMode: 'capsule', capsuleReturn });
     if (!isBrowserPreview) {
       api.setWindowMode('capsule').catch(() => undefined);
     }
   },
 
   exitCapsule: () => {
-    const view: View = { name: 'today' };
-    set({ view, windowMode: 'panel' });
+    const target = get().capsuleReturn;
+    const view: View = target?.view ?? { name: 'today' };
+    const mode: WindowMode = target?.windowMode ?? modeForView(view);
+    set({ view, windowMode: mode, capsuleReturn: null });
     if (!isBrowserPreview) {
-      api.setWindowMode('panel').catch(() => undefined);
+      api.setWindowMode(mode).catch(() => undefined);
     }
   },
 
@@ -329,21 +343,28 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   handleAppEvent: (event, payload) => {
+    const currentView = get().view;
+    const currentMode = get().windowMode;
     if (event === 'fold:shortcut') {
-      const current = get().windowMode;
-      if (current === 'capsule') {
+      if (currentMode === 'capsule') {
         get().exitCapsule();
-      } else {
+      } else if (currentView.name !== 'onboarding' && currentView.name !== 'study') {
         get().navigate({ name: 'today' }, { mode: 'panel' });
       }
       return;
     }
     if (event === 'fold:navigate') {
       if (payload === 'review') {
-        get().navigate({ name: 'review' }, { mode: 'review' });
+        if (currentView.name === 'study' || currentView.name === 'onboarding') {
+          get().navigate({ name: 'study' });
+        } else {
+          get().navigate({ name: 'review' }, { mode: 'review' });
+        }
       } else {
-        if (get().windowMode === 'capsule') get().exitCapsule();
-        else get().navigate({ name: 'today' }, { mode: 'panel' });
+        if (currentMode === 'capsule') get().exitCapsule();
+        else if (currentView.name !== 'onboarding' && currentView.name !== 'study') {
+          get().navigate({ name: 'today' }, { mode: 'panel' });
+        }
       }
       return;
     }

@@ -280,6 +280,23 @@ fn migrate(conn: &Connection, path: &Path) -> AppResult<()> {
     Ok(())
 }
 
+pub fn sanitize_backup_db(path: &Path) -> AppResult<()> {
+    let check = Connection::open(path)?;
+    check.execute(
+        "UPDATE settings SET value = ''
+         WHERE key LIKE '%api_key%' OR key LIKE '%secret%' OR key LIKE '%token%'",
+        [],
+    )?;
+    let integrity: String = check.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
+    if integrity != "ok" {
+        return Err(AppError::user(
+            "backup_integrity_failed",
+            format!("备份校验失败：{integrity}"),
+        ));
+    }
+    Ok(())
+}
+
 fn backup_before_migration(conn: &Connection, path: &Path, version: i64) -> AppResult<()> {
     let backup_dir = path
         .parent()
@@ -289,15 +306,7 @@ fn backup_before_migration(conn: &Connection, path: &Path, version: i64) -> AppR
     let stamp = Utc::now().format("%Y%m%d-%H%M%S");
     let target = backup_dir.join(format!("pre-migrate-v{version}-{stamp}.db"));
     conn.backup(rusqlite::MAIN_DB, &target, None)?;
-    let check = Connection::open(&target)?;
-    let integrity: String = check.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
-    if integrity != "ok" {
-        return Err(AppError::user(
-            "backup_failed",
-            format!("迁移前备份校验失败：{integrity}"),
-        ));
-    }
-    Ok(())
+    sanitize_backup_db(&target)
 }
 
 fn seed_defaults(conn: &Connection) -> AppResult<()> {

@@ -6,13 +6,14 @@ import {
   FilePlus2,
   Highlighter,
   MessageSquarePlus,
+  PenLine,
   Quote,
   ShieldCheck,
 } from 'lucide-react';
 
 import { ImportModal } from '@/components/ImportModal';
 import { Modal } from '@/components/Modal';
-import { EmptyState, ErrorState, Loading, Spinner } from '@/components/ui';
+import { EmptyState, ErrorState, Field, Loading, Spinner } from '@/components/ui';
 import { api } from '@/lib/api';
 import { normalizeError } from '@/lib/bridge';
 import { formatDateCN, relativeTime, sourceKindLabel, trustLabel } from '@/lib/format';
@@ -30,6 +31,8 @@ export function ReaderScreen({ sourceId, revisionId }: ReaderProps) {
   const navigate = useApp((state) => state.navigate);
   const goBack = useApp((state) => state.goBack);
   const refreshLibrary = useApp((state) => state.refreshLibrary);
+  const refreshOverview = useApp((state) => state.refreshOverview);
+  const markOnboarded = useApp((state) => state.markOnboarded);
   const toast = useApp((state) => state.toast);
   const [activeRevisionId, setActiveRevisionId] = useState<string | null>(revisionId);
   const [detail, setDetail] = useState<SourceDetail | null>(null);
@@ -40,9 +43,15 @@ export function ReaderScreen({ sourceId, revisionId }: ReaderProps) {
   const [forking, setForking] = useState(false);
   const [revisionOpen, setRevisionOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [cardSelection, setCardSelection] = useState<SelectionInfo | null>(null);
+  const [cardConcept, setCardConcept] = useState('');
+  const [cardQuestion, setCardQuestion] = useState('');
+  const [cardAnswer, setCardAnswer] = useState('');
+  const [cardBusy, setCardBusy] = useState(false);
   const [marked, setMarked] = useState<{ start: number; end: number } | null>(null);
   const articleRef = useRef<HTMLElement | null>(null);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const lastScrollTop = useRef(0);
 
   useEffect(() => {
     setActiveRevisionId(revisionId);
@@ -151,10 +160,61 @@ export function ReaderScreen({ sourceId, revisionId }: ReaderProps) {
       window.getSelection()?.removeAllRanges();
       setSelection(null);
       toast('success', '已开一个临时分叉', '原文没有被改写。这条线索保存了逐字引用与来源版本。');
-      navigate({ name: 'session', sessionId: session.session.id });
+      navigate({ name: 'session', sessionId: session.session.id }, { mode: 'panorama' });
     } catch (err) {
       toast('error', '没能开分叉', normalizeError(err).message);
       setForking(false);
+    }
+  }
+
+  function openSelectionCardModal() {
+    if (!detail || !selection) return;
+    setCardSelection(selection);
+    setCardConcept(selection.heading || detail.source.title);
+    setCardQuestion('');
+    setCardAnswer('');
+    window.getSelection()?.removeAllRanges();
+    setSelection(null);
+  }
+
+  async function saveSelectionCard() {
+    if (!detail || !cardSelection || cardBusy) return;
+    if (!cardConcept.trim() || !cardQuestion.trim() || !cardAnswer.trim()) {
+      toast('info', '还差一点', '概念名、题目与参考答案都需要填写。');
+      return;
+    }
+    setCardBusy(true);
+    try {
+      const chunk = await api.createChunk({
+        sourceId: detail.source.id,
+        revisionId: detail.revision.id,
+        quoteExact: cardSelection.exact,
+        prefix: cardSelection.prefix,
+        suffix: cardSelection.suffix,
+        startUtf16: cardSelection.startUtf16,
+        endUtf16: cardSelection.endUtf16,
+        heading: cardSelection.heading,
+        locator: cardSelection.locator,
+      });
+      const created = await api.createCardDraft({
+        conceptName: cardConcept.trim(),
+        question: cardQuestion.trim(),
+        answer: cardAnswer.trim(),
+        evidenceChunkId: chunk.id,
+        evidenceExcerpt: cardSelection.exact.slice(0, 220),
+        exerciseOrigin: 'adapted',
+        originNote: '从阅读选区直接创建 · 自评草稿',
+        mode: 'self',
+        sessionId: null,
+      });
+      setCardSelection(null);
+      await Promise.all([refreshLibrary(), refreshOverview(), markOnboarded()]);
+      toast('success', '已保存为带证据草稿', '检查后点击「收下」即可进入队列。');
+      navigate({ name: 'card', cardId: created.summary.id });
+    } catch (err) {
+      toast('error', '建卡失败', normalizeError(err).message);
+    } finally {
+      setCardBusy(false);
     }
   }
 
@@ -238,7 +298,16 @@ export function ReaderScreen({ sourceId, revisionId }: ReaderProps) {
       </div>
 
       <div className="reader-layout">
-        <main className="reader-main" onScroll={() => setSelection(null)}>
+        <main
+          className="reader-main"
+          onScroll={(event) => {
+            const top = event.currentTarget.scrollTop;
+            if (Math.abs(top - lastScrollTop.current) > 36) {
+              setSelection(null);
+            }
+            lastScrollTop.current = top;
+          }}
+        >
           <article className="reader-sheet" ref={articleRef}>
             <div className="reader-kicker">
               <span>{sourceKicker(source.origin)}</span>
@@ -397,8 +466,8 @@ export function ReaderScreen({ sourceId, revisionId }: ReaderProps) {
             left: Math.max(
               12,
               Math.min(
-                window.innerWidth - 236,
-                (selection.rect?.left ?? 20) + (selection.rect?.width ?? 0) / 2 - 108,
+                window.innerWidth - 320,
+                (selection.rect?.left ?? 20) + (selection.rect?.width ?? 0) / 2 - 150,
               ),
             ),
             top: Math.max(
@@ -413,6 +482,9 @@ export function ReaderScreen({ sourceId, revisionId }: ReaderProps) {
           <button type="button" className="selection-action" onClick={() => void openFork()} disabled={forking}>
             {forking ? <Spinner size={11} /> : <MessageSquarePlus size={12} style={{ verticalAlign: -2 }} />}{' '}
             <strong>开分叉</strong>
+          </button>
+          <button type="button" className="selection-action" onClick={openSelectionCardModal}>
+            <PenLine size={11} style={{ verticalAlign: -2 }} /> 从选区建卡
           </button>
           <button type="button" className="selection-action" onClick={() => void copyQuote()}>
             <Copy size={11} style={{ verticalAlign: -2 }} /> 复制引用
@@ -487,6 +559,64 @@ export function ReaderScreen({ sourceId, revisionId }: ReaderProps) {
           setRevisionOpen(false);
         }}
       />
+
+      <Modal
+        open={Boolean(cardSelection)}
+        title="从选区直接建卡"
+        subtitle="离线手写卡片，逐字绑定当前选中的原文位置。保存为草稿后可在卡片详情检查并收下。"
+        onClose={() => (cardBusy ? undefined : setCardSelection(null))}
+        footer={
+          <>
+            <button type="button" className="btn btn-ghost" onClick={() => setCardSelection(null)} disabled={cardBusy}>
+              取消
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => void saveSelectionCard()} disabled={cardBusy}>
+              {cardBusy ? <Spinner /> : <PenLine size={14} />}
+              保存草稿
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {cardSelection ? (
+            <div className="evidence-box" style={{ marginTop: 0 }}>
+              <div className="evidence-excerpt">“{cardSelection.exact.slice(0, 220)}{cardSelection.exact.length > 220 ? '…' : ''}”</div>
+              <div className="evidence-meta">
+                <span>{source.title}</span>
+                <span>·</span>
+                <span>{cardSelection.locator ?? '原文'}</span>
+              </div>
+            </div>
+          ) : null}
+          <Field label="概念名">
+            <input
+              className="input"
+              value={cardConcept}
+              onChange={(event) => setCardConcept(event.target.value)}
+              placeholder="例如：登记顺序"
+            />
+          </Field>
+          <Field label="题目" hint="问一个能独立回忆的问题，不在题干里泄露答案。">
+            <textarea
+              className="textarea"
+              rows={3}
+              value={cardQuestion}
+              onChange={(event) => setCardQuestion(event.target.value)}
+              placeholder="根据这段原文，自己写一个回忆题…"
+              autoFocus
+            />
+          </Field>
+          <Field label="参考答案">
+            <textarea
+              className="textarea"
+              rows={3}
+              value={cardAnswer}
+              onChange={(event) => setCardAnswer(event.target.value)}
+              placeholder="写出核对时的标准答案…"
+            />
+          </Field>
+        </div>
+      </Modal>
     </div>
   );
 }

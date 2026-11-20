@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import { Archive } from 'lucide-react';
 
 import { BrandMark } from '@/components/BrandMark';
 import { Capsule } from '@/components/Capsule';
@@ -27,8 +26,6 @@ export default function App() {
   const fatalError = useApp((state) => state.fatalError);
   const view = useApp((state) => state.view);
   const windowMode = useApp((state) => state.windowMode);
-  const hasLegacy = useApp((state) => state.bootstrap?.isFirstRun === false);
-  const navigate = useApp((state) => state.navigate);
   const init = useApp((state) => state.init);
 
   useEffect(() => {
@@ -163,13 +160,6 @@ export default function App() {
       <div className="hud-shell" data-mode={windowMode}>
         {showTitlebar ? <Titlebar /> : null}
         {showNav ? <NavTabs /> : null}
-        {isTauri && hasLegacy && view.name === 'study' ? (
-          <div className="guided-legacy">
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate({ name: 'library' })}>
-              <Archive size={13} /> 以前的资料
-            </button>
-          </div>
-        ) : null}
         <div className="content">{renderView()}</div>
       </div>
       <CloudConsent />
