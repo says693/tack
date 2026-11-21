@@ -280,14 +280,61 @@ fn migrate(conn: &Connection, path: &Path) -> AppResult<()> {
     Ok(())
 }
 
-pub fn sanitize_backup_db(path: &Path) -> AppResult<()> {
-    let check = Connection::open(path)?;
-    check.execute(
+pub fn backup_db(conn: &Connection, path: &Path) -> AppResult<()> {
+    if let Some(source) = conn.path() {
+        if let (Ok(source), Ok(destination)) = (Path::new(source).canonicalize(), path.canonicalize()) {
+            if source == destination {
+                return Err(AppError::user(
+                    "backup_is_source",
+                    "备份不能覆盖正在使用的数据库，请选择其他文件。",
+                ));
+            }
+        }
+    }
+
+    // Keep the unsanitized snapshot and SQLite temporary storage off disk.
+    let mut snapshot = Connection::open_in_memory()?;
+    snapshot.execute_batch("PRAGMA temp_store = MEMORY;")?;
+    {
+        let backup = rusqlite::backup::Backup::new(conn, &mut snapshot)?;
+        backup.run_to_completion(100, Duration::from_millis(10), None)?;
+    }
+    snapshot.execute(
         "UPDATE settings SET value = ''
          WHERE key LIKE '%api_key%' OR key LIKE '%secret%' OR key LIKE '%token%'",
         [],
     )?;
-    let integrity: String = check.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let temporary = path.with_file_name(format!(".{}.tmp", new_id("backup")));
+    let temporary_name = temporary
+        .to_str()
+        .ok_or_else(|| rusqlite::Error::InvalidPath(temporary.clone()))?;
+    let reserved = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)?;
+    drop(reserved);
+    let result = (|| -> AppResult<()> {
+        // Rebuild only live data, omitting old values in free space and overflow pages.
+        snapshot.execute("VACUUM INTO ?1", [temporary_name])?;
+        let check = Connection::open_with_flags(&temporary, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        verify_backup(&check)?;
+        drop(check);
+        std::fs::rename(&temporary, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        // A cleanup failure can leave only an already sanitized temporary snapshot.
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn verify_backup(conn: &Connection) -> AppResult<()> {
+    let integrity: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
     if integrity != "ok" {
         return Err(AppError::user(
             "backup_integrity_failed",
@@ -302,11 +349,9 @@ fn backup_before_migration(conn: &Connection, path: &Path, version: i64) -> AppR
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join("backups");
-    std::fs::create_dir_all(&backup_dir)?;
     let stamp = Utc::now().format("%Y%m%d-%H%M%S");
     let target = backup_dir.join(format!("pre-migrate-v{version}-{stamp}.db"));
-    conn.backup(rusqlite::MAIN_DB, &target, None)?;
-    sanitize_backup_db(&target)
+    backup_db(conn, &target)
 }
 
 fn seed_defaults(conn: &Connection) -> AppResult<()> {
@@ -425,5 +470,50 @@ mod tests {
         set_setting(&conn, "study.daily_new", "7").unwrap();
         set_setting(&conn, "study.daily_new", "8").unwrap();
         assert_eq!(get_setting_i64(&conn, "study.daily_new", 0), 8);
+    }
+
+    #[test]
+    fn backup_failure_does_not_publish_or_replace_destination() {
+        // Missing settings deliberately forces sanitization to fail.
+        let conn = Connection::open_in_memory().unwrap();
+        let directory = std::env::temp_dir().join(new_id("backup-failure-test"));
+        std::fs::create_dir(&directory).unwrap();
+        let target = directory.join("backup.db");
+        assert!(backup_db(&conn, &target).is_err());
+        assert!(!target.exists());
+        let previous = b"previous backup must survive";
+        std::fs::write(&target, previous).unwrap();
+        assert!(backup_db(&conn, &target).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), previous);
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn backup_publish_failure_cleans_sanitized_temporary_file() {
+        let conn = test_conn();
+        let directory = std::env::temp_dir().join(new_id("backup-publish-test"));
+        let target = directory.join("destination");
+        std::fs::create_dir_all(&target).unwrap();
+        assert!(backup_db(&conn, &target).is_err());
+        assert!(target.is_dir());
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn backup_cannot_replace_active_database() {
+        let directory = std::env::temp_dir().join(new_id("backup-source-test"));
+        let source = directory.join("source.db");
+        let conn = open_db(&source).unwrap();
+        set_setting(&conn, "study.daily_new", "7").unwrap();
+        let result = backup_db(&conn, &source);
+        assert!(matches!(result, Err(AppError::User { ref code, .. }) if code == "backup_is_source"));
+        assert_eq!(get_setting_i64(&conn, "study.daily_new", 0), 7);
+        drop(conn);
+        let conn = open_db(&source).unwrap();
+        assert_eq!(get_setting_i64(&conn, "study.daily_new", 0), 7);
+        drop(conn);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

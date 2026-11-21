@@ -213,11 +213,7 @@ pub fn export_json(conn: &Connection, path: &Path) -> AppResult<ExportResult> {
 }
 
 pub fn backup_db(conn: &Connection, path: &Path) -> AppResult<ExportResult> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    conn.backup(rusqlite::MAIN_DB, path, None)?;
-    db::sanitize_backup_db(path)?;
+    db::backup_db(conn, path)?;
     let bytes = std::fs::metadata(path).map(|m| m.len() as i64).unwrap_or(0);
     Ok(ExportResult {
         path: path.to_string_lossy().to_string(),
@@ -300,10 +296,23 @@ mod tests {
     fn backup_db_strips_sensitive_settings() {
         let conn = test_conn();
         seed(&conn);
-        crate::db::set_setting(&conn, "model.api_key", "sk-never-in-backup").unwrap();
-        crate::db::set_setting(&conn, "auth.token", "tok-never-in-backup").unwrap();
-        crate::db::set_setting(&conn, "custom.secret", "sec-never-in-backup").unwrap();
+        conn.pragma_update(None, "secure_delete", "OFF").unwrap();
+        let previous = "retired-backup-marker".repeat(8192);
+        crate::db::set_setting(&conn, "model.api_key", &previous).unwrap();
+        let secrets = [
+            ("model.api_key", "active-api-marker".repeat(512)),
+            ("auth.token", "active-token-marker".repeat(512)),
+            ("custom.secret", "active-secret-marker".repeat(512)),
+        ];
+        for (key, value) in &secrets {
+            crate::db::set_setting(&conn, key, value).unwrap();
+        }
         let target = std::env::temp_dir().join(format!("{}.db", crate::db::new_id("backup-test")));
+        let previous_backup = Connection::open(&target).unwrap();
+        previous_backup
+            .execute_batch("CREATE TABLE previous_backup (id INTEGER);")
+            .unwrap();
+        drop(previous_backup);
 
         let result = backup_db(&conn, &target).unwrap();
         assert!(result.bytes > 0);
@@ -311,11 +320,25 @@ mod tests {
         for key in ["model.api_key", "auth.token", "custom.secret"] {
             assert_eq!(crate::db::get_setting(&backup_conn, key).as_deref(), Some(""));
         }
-        assert_eq!(
-            crate::db::get_setting(&conn, "model.api_key").as_deref(),
-            Some("sk-never-in-backup")
+        assert!(
+            crate::db::get_setting(&conn, "model.api_key").as_deref()
+                == Some(secrets[0].1.as_str())
         );
+        assert_eq!(crate::db::get_setting_i64(&backup_conn, "study.daily_new", 0), 10);
+        let cards: i64 = backup_conn
+            .query_row("SELECT COUNT(*) FROM card", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(cards, 1);
         drop(backup_conn);
+        let bytes = std::fs::read(&target).unwrap();
+        for marker in [
+            "retired-backup-marker",
+            "active-api-marker",
+            "active-token-marker",
+            "active-secret-marker",
+        ] {
+            assert!(!bytes.windows(marker.len()).any(|window| window == marker.as_bytes()));
+        }
         for ext in ["db", "db-wal", "db-shm"] {
             let _ = std::fs::remove_file(target.with_extension(ext));
         }
